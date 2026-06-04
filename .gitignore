@@ -9,6 +9,9 @@ node_modules/
 # Build output
 dist/
 
+# Uploaded files (runtime data, not source)
+backend/uploads/
+
 # Logs
 *.log
 logs/
