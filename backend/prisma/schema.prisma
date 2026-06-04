@@ -1,0 +1,366 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum TourType {
+  STANDARD
+  GV
+  INSTALL
+  MONO
+  SPECIAL
+}
+
+enum EmployeeRole {
+  CHAUFFEUR
+  AIDE
+}
+
+enum WorkedDayStatus {
+  ASSIGNED
+  CONFIRMED
+  CANCELLED
+}
+
+enum ExpressMissionType {
+  STANDARD
+  GV
+}
+
+enum ConfirmationStatus {
+  UNCONFIRMED
+  CONFIRMED
+}
+
+enum TourSource {
+  IMPORT
+  MANUAL
+}
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   // e.g., 'admin', 'dispatcher', 'employee'
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  auditEvents          AuditEvent[]
+  employee             Employee?
+  repairLogs           TruckRepairLog[]
+  uploadedDocuments    EmployeeDocument[]
+  updatedPayRates      EmployeePayRate[]
+  overriddenWorkedDays WorkedDay[]      @relation("WorkedDayOverride")
+  addedExpressMissions ExpressMission[]
+
+  @@map("users")
+}
+
+model Employee {
+  id        String   @id @default(uuid())
+  name      String
+  firstName String?  @map("first_name")
+  lastName  String?  @map("last_name")
+  phone     String?
+  role      String
+  address   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  userId    String?  @unique @map("user_id")
+
+  user                   User?     @relation(fields: [userId], references: [id])
+  assignmentsAsChauffeur Assignment[] @relation("ChauffeurAssignments")
+  assignmentsAsAide      Assignment[] @relation("AideAssignments")
+  expressDeliveries      ExpressDelivery[]
+  workedDays             WorkedDay[]
+  documents              EmployeeDocument[]
+  payRates               EmployeePayRate[]
+  tourConfirmations      TourConfirmation[]
+
+  @@map("employees")
+}
+
+model Truck {
+  id              String   @id @default(uuid())
+  immatriculation String   @unique
+  isAvailable     Boolean  @default(true) @map("is_available")
+  status          String   @default("available")  // available | unavailable | in_repair
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  assignments       Assignment[]
+  expressDeliveries ExpressDelivery[]
+  assignmentHistory TruckAssignmentHistory[]
+  repairLogs        TruckRepairLog[]
+
+  @@map("trucks")
+}
+
+model Platform {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tours Tour[]
+
+  @@map("platforms")
+}
+
+model Tour {
+  id             String   @id @default(uuid())
+  tourCode       String   @map("tour_code")         // e.g. "804", "702"
+  tourType       String?  @map("tour_type")          // Standard, GV, Mono, Install, Spéciale
+  date           DateTime
+  platformId     String   @map("platform_id")
+  status         String   @default("imported")       // imported, assigned, notified, completed, conflict, cancelled
+  importBatchId  String?  @map("import_batch_id")
+  // Boulanger operational data from Excel
+  horaire        String?                              // Pickup time e.g. "7:30", "8:00"
+  quai           String?                              // Dock number e.g. "54", "Qretour"
+  nbColis        Int?     @map("nb_colis")            // Number of parcels
+  prestataire    String?                              // Company name as-is e.g. "STP_GV 1"
+  immatriculation String?                             // Truck plate from Boulanger file (may differ from STP's own truck)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  confirmationStatus ConfirmationStatus @default(UNCONFIRMED) @map("confirmation_status")
+  source             TourSource         @default(IMPORT)
+
+  platform     Platform          @relation(fields: [platformId], references: [id])
+  importBatch  ImportBatch?      @relation(fields: [importBatchId], references: [id])
+  assignments  Assignment[]
+  workedDays   WorkedDay[]
+  confirmation TourConfirmation?
+
+  @@unique([tourCode, date, platformId], name: "tour_unique_per_day")
+  @@index([date])
+  @@index([status])
+  @@index([platformId])
+  @@map("tours")
+}
+
+model ImportBatch {
+  id         String   @id @default(uuid())
+  fileName   String   @map("file_name")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+  status     String   @default("pending") // e.g., 'pending', 'processing', 'preview', 'committed', 'failed'
+  rowCount   Int      @default(0) @map("row_count")
+  errorCount Int      @default(0) @map("error_count")
+
+  rows  ImportRow[]
+  tours Tour[]
+
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id           String  @id @default(uuid())
+  batchId      String  @map("batch_id")
+  sheetName    String  @map("sheet_name")
+  rowIndex     Int     @map("row_index")
+  rawData      Json    @map("raw_data")
+  parsedData   Json?   @map("parsed_data")
+  status       String  @default("pending") // e.g., 'pending', 'valid', 'error'
+  errorMessage String? @map("error_message")
+
+  batch ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@map("import_rows")
+}
+
+model Assignment {
+  id          String    @id @default(uuid())
+  tourId      String    @map("tour_id")
+  chauffeurId String?   @map("chauffeur_id")
+  aideId      String?   @map("aide_id")
+  truckId     String?   @map("truck_id")
+  assignedAt      DateTime  @default(now()) @map("assigned_at")
+  chauffeurSeenAt DateTime? @map("chauffeur_seen_at")
+  aideSeenAt      DateTime? @map("aide_seen_at")
+
+  tour      Tour      @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  chauffeur Employee? @relation("ChauffeurAssignments", fields: [chauffeurId], references: [id])
+  aide      Employee? @relation("AideAssignments", fields: [aideId], references: [id])
+  truck     Truck?    @relation(fields: [truckId], references: [id])
+
+  @@index([tourId])
+  @@map("assignments")
+}
+
+model ExpressDelivery {
+  id         String   @id @default(uuid())
+  address    String
+  date       DateTime
+  assigneeId String?  @map("assignee_id")
+  truckId    String?  @map("truck_id")
+  notes      String?
+  status     String   @default("pending") // e.g., 'pending', 'assigned', 'completed'
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  assignee Employee? @relation(fields: [assigneeId], references: [id])
+  truck    Truck?    @relation(fields: [truckId], references: [id])
+
+  @@index([date])
+  @@map("express_deliveries")
+}
+
+model TourConfirmation {
+  id            String   @id @default(uuid())
+  tourId        String   @unique @map("tour_id")
+  confirmedById String   @map("confirmed_by_id")
+  totalClients  Int      @map("total_clients")
+  delivered     Int
+  absent        Int
+  nonConform    Int      @map("non_conform")
+  notes         String?
+  confirmedAt   DateTime @default(now()) @map("confirmed_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tour        Tour     @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  confirmedBy Employee @relation(fields: [confirmedById], references: [id])
+
+  @@index([tourId])
+  @@map("tour_confirmations")
+}
+
+model EmployeePayRate {
+  id            String   @id @default(uuid())
+  employeeId    String   @map("employee_id")
+  tourType      TourType @map("tour_type")
+  chauffeurRate Float    @map("chauffeur_rate")
+  aideRate      Float?   @map("aide_rate")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  updatedById   String?  @map("updated_by_id")
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation(fields: [updatedById], references: [id])
+
+  @@unique([employeeId, tourType])
+  @@index([employeeId])
+  @@map("employee_pay_rates")
+}
+
+model WorkedDay {
+  id           String          @id @default(uuid())
+  employeeId   String          @map("employee_id")
+  tourId       String?         @map("tour_id")
+  date         DateTime        @db.Date
+  tourType     TourType        @map("tour_type")
+  employeeRole EmployeeRole    @map("employee_role")
+  basePay      Float           @map("base_pay")
+  overridePay  Float?          @map("override_pay")
+  finalPay     Float           @map("final_pay")
+  status       WorkedDayStatus @default(ASSIGNED)
+  confirmedAt  DateTime?       @map("confirmed_at")
+  overrideNote String?         @map("override_note")
+  overrideById String?         @map("override_by_id")
+  overrideAt   DateTime?       @map("override_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  tour            Tour?           @relation(fields: [tourId], references: [id])
+  overrideBy      User?           @relation("WorkedDayOverride", fields: [overrideById], references: [id])
+  expressMissions ExpressMission[]
+
+  @@index([employeeId])
+  @@index([date])
+  @@index([tourId])
+  @@map("worked_days")
+}
+
+model ExpressMission {
+  id          String             @id @default(uuid())
+  workedDayId String             @map("worked_day_id")
+  type        ExpressMissionType
+  pay         Float
+  notes       String?
+  addedById   String             @map("added_by_id")
+  addedAt     DateTime           @default(now()) @map("added_at")
+
+  workedDay WorkedDay @relation(fields: [workedDayId], references: [id], onDelete: Cascade)
+  addedBy   User      @relation(fields: [addedById], references: [id])
+
+  @@index([workedDayId])
+  @@map("express_missions")
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  action     String   // e.g., 'import_committed', 'assignment_created', 'tour_updated'
+  entityType String   @map("entity_type") // e.g., 'tour', 'assignment', 'import_batch'
+  entityId   String   @map("entity_id")
+  userId     String?  @map("user_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
+
+model TruckAssignmentHistory {
+  id            String   @id @default(uuid())
+  truckId       String   @map("truck_id")
+  tourId        String   @map("tour_id")      // snapshot — no FK so deleting a tour doesn't cascade
+  tourCode      String   @map("tour_code")
+  date          DateTime
+  chauffeurName String?  @map("chauffeur_name")
+  aideName      String?  @map("aide_name")
+  action        String   @default("assigned") // assigned | unassigned
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@index([truckId])
+  @@index([date])
+  @@map("truck_assignment_history")
+}
+
+model TruckRepairLog {
+  id          String   @id @default(uuid())
+  truckId     String   @map("truck_id")
+  date        DateTime @db.Date
+  type        String   // OIL_CHANGE | REPAIR | BREAKDOWN | INSPECTION | OTHER
+  description String
+  cost        Float?
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  truck     Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@index([truckId])
+  @@index([date])
+  @@map("truck_repair_logs")
+}
+
+model EmployeeDocument {
+  id           String   @id @default(uuid())
+  employeeId   String   @map("employee_id")
+  fileName     String   @map("file_name")
+  originalName String   @map("original_name")
+  fileType     String   @map("file_type")  // ID | PASSPORT | CV | OTHER
+  filePath     String   @map("file_path")
+  mimeType     String   @map("mime_type")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+  uploadedById String?  @map("uploaded_by_id")
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  uploadedBy User?    @relation(fields: [uploadedById], references: [id])
+
+  @@index([employeeId])
+  @@map("employee_documents")
+}
