@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+/* ── Mobile responsive ──────────────────────────────────────────────────────── */
+
+/* Horizontal scroll tables */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Momentum scrolling for lists */
+.scroll-smooth-touch {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+/* Prevent page-level horizontal overflow on mobile */
+@media (max-width: 767px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Inline icon-only buttons exempted from forced min-height */
+  .touch-compact button,
+  .touch-compact [role="button"] {
+    min-height: unset !important;
+  }
+}

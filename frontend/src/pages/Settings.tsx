@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   User, Lock, FileText, Upload, Download, Trash2,
-  Loader2, CheckCircle, AlertCircle, Phone, MapPin, Mail,
+  Loader2, CheckCircle, AlertCircle, Phone, MapPin, Mail, Info,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -40,6 +40,23 @@ interface EmployeeDocument {
   uploadedAt: string;
   uploadedBy: { email: string } | null;
 }
+
+interface GlobalPayRate {
+  tourType: string;
+  chauffeurRate: number;
+  aideRate: number | null;
+  updatedAt: string | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
+const TOUR_TYPES_ORDER = ['STANDARD', 'GV', 'INSTALL', 'MONO', 'SPECIAL'] as const;
+const TOUR_TYPE_LABELS: Record<string, string> = {
+  STANDARD: 'Standard',
+  GV: 'GV',
+  INSTALL: 'Install',
+  MONO: 'Mono',
+  SPECIAL: 'Spéciale',
+};
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +136,12 @@ export default function Settings() {
   const [pwdMsg, setPwdMsg] = useState({ ok: false, msg: '' });
   const [emailMsg, setEmailMsg] = useState({ ok: false, msg: '' });
 
+  // Global pay rates state (admin only)
+  const [globalRates, setGlobalRates] = useState<Record<string, { chauffeurRate: string; aideRate: string }>>({});
+  const [globalRatesMeta, setGlobalRatesMeta] = useState<{ updatedAt: string | null; email: string | null }>({ updatedAt: null, email: null });
+  const [globalRatesMsg, setGlobalRatesMsg] = useState({ ok: false, msg: '' });
+  const [globalRatesSaving, setGlobalRatesSaving] = useState(false);
+
   // ── Profile form ──────────────────────────────────────────────────────────
 
   const {
@@ -161,6 +184,12 @@ export default function Settings() {
     enabled: isEmployee && !!profile?.id,
   });
 
+  const { data: globalPayRates, isLoading: globalRatesLoading } = useQuery<GlobalPayRate[]>({
+    queryKey: ['global-pay-rates'],
+    queryFn: () => api.get<GlobalPayRate[]>('/settings/pay-rates').then((r) => r.data),
+    enabled: !isEmployee,
+  });
+
   // Pre-fill profile form when data loads
   useEffect(() => {
     if (profile) {
@@ -173,6 +202,25 @@ export default function Settings() {
       });
     }
   }, [profile, resetProfile]);
+
+  useEffect(() => {
+    if (!globalPayRates) return;
+    const map: Record<string, { chauffeurRate: string; aideRate: string }> = {};
+    let latestAt: string | null = null;
+    let latestEmail: string | null = null;
+    for (const r of globalPayRates) {
+      map[r.tourType] = {
+        chauffeurRate: String(r.chauffeurRate),
+        aideRate: r.aideRate != null ? String(r.aideRate) : '',
+      };
+      if (r.updatedAt && (!latestAt || r.updatedAt > latestAt)) {
+        latestAt = r.updatedAt;
+        latestEmail = r.updatedBy?.email ?? null;
+      }
+    }
+    setGlobalRates(map);
+    setGlobalRatesMeta({ updatedAt: latestAt, email: latestEmail });
+  }, [globalPayRates]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -254,6 +302,25 @@ export default function Settings() {
     }
   };
 
+  const handleSaveGlobalRates = async () => {
+    setGlobalRatesSaving(true);
+    setGlobalRatesMsg({ ok: false, msg: '' });
+    try {
+      const rates = TOUR_TYPES_ORDER.map((tt) => ({
+        tourType: tt,
+        chauffeurRate: parseFloat(globalRates[tt]?.chauffeurRate || '0') || 0,
+        aideRate: globalRates[tt]?.aideRate !== '' ? parseFloat(globalRates[tt]?.aideRate || '') || null : null,
+      }));
+      await api.put('/settings/pay-rates', { rates });
+      queryClient.invalidateQueries({ queryKey: ['global-pay-rates'] });
+      setGlobalRatesMsg({ ok: true, msg: 'Tarifs enregistrés.' });
+    } catch (err: any) {
+      setGlobalRatesMsg({ ok: false, msg: err.response?.data?.message || 'Erreur enregistrement.' });
+    } finally {
+      setGlobalRatesSaving(false);
+    }
+  };
+
   const handleDelete = async (docId: string) => {
     if (!profile) return;
     try {
@@ -267,7 +334,7 @@ export default function Settings() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="w-full max-w-2xl space-y-4 md:space-y-6">
       <h1 className="text-2xl font-bold">Paramètres</h1>
 
       {isEmployee ? (
@@ -577,11 +644,99 @@ export default function Settings() {
             </Card>
           </div>
 
-          {/* Placeholder for future admin settings */}
-          <Card className="p-6 border-dashed">
-            <p className="text-sm text-gray-400 text-center">
-              D'autres paramètres système seront disponibles prochainement.
-            </p>
+          {/* Global pay rates */}
+          <Card className="p-6 space-y-4">
+            <h2 className="font-semibold text-gray-800">Tarifs par défaut</h2>
+            <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                Ces tarifs s'appliquent à tous les employés sans tarif personnalisé.
+                Les journées déjà enregistrées ne sont pas modifiées.
+              </span>
+            </div>
+            {globalRatesLoading ? (
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            ) : (
+              <>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-gray-500 border-b">
+                      <th className="text-left py-2 font-medium">Type</th>
+                      <th className="text-center py-2 font-medium">Chauffeur (€)</th>
+                      <th className="text-center py-2 font-medium">Aide (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {TOUR_TYPES_ORDER.map((tt) => {
+                      const isMono = tt === 'MONO';
+                      const vals = globalRates[tt] ?? { chauffeurRate: '', aideRate: '' };
+                      return (
+                        <tr key={tt}>
+                          <td className="py-2 font-medium">{TOUR_TYPE_LABELS[tt]}</td>
+                          <td className="py-2 text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={vals.chauffeurRate}
+                              onChange={(e) =>
+                                setGlobalRates((prev) => ({
+                                  ...prev,
+                                  [tt]: { ...vals, chauffeurRate: e.target.value },
+                                }))
+                              }
+                              className="w-20 border rounded px-2 py-1 text-center text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-2 text-center">
+                            {isMono ? (
+                              <span className="text-gray-300">—</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={vals.aideRate}
+                                onChange={(e) =>
+                                  setGlobalRates((prev) => ({
+                                    ...prev,
+                                    [tt]: { ...vals, aideRate: e.target.value },
+                                  }))
+                                }
+                                className="w-20 border rounded px-2 py-1 text-center text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="flex items-center gap-3 pt-1">
+                  <Button onClick={handleSaveGlobalRates} disabled={globalRatesSaving}>
+                    {globalRatesSaving ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
+                    ) : (
+                      'Enregistrer les tarifs'
+                    )}
+                  </Button>
+                </div>
+                <Feedback ok={globalRatesMsg.ok} msg={globalRatesMsg.msg} />
+                {globalRatesMeta.updatedAt && (
+                  <p className="text-xs text-gray-400">
+                    Dernière modification le{' '}
+                    {new Date(globalRatesMeta.updatedAt).toLocaleDateString('fr-FR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    })}{' '}
+                    par {globalRatesMeta.email ?? 'inconnu'}
+                  </p>
+                )}
+              </>
+            )}
           </Card>
         </div>
       )}

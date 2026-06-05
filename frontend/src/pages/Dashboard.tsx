@@ -58,37 +58,30 @@ export default function Dashboard() {
   ];
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
+    <div className="space-y-4 md:space-y-6">
+      <h1 className="text-xl md:text-2xl font-bold">Dashboard</h1>
 
-      {/* Error state */}
       {isError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
-          Failed to load dashboard stats. Please check your connection or try again later.
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
+          Impossible de charger les statistiques. Vérifiez votre connexion.
         </div>
       )}
 
-      {/* Stat cards grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Stat cards — 2 columns on mobile, 4 on desktop */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.title}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">
-                  {stat.title}
-                </CardTitle>
-                <div className={`p-2 rounded-md ${stat.bgColor}`}>
-                  <Icon className={`h-4 w-4 ${stat.color}`} />
+            <Card key={stat.title} className="overflow-hidden">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-gray-500 leading-snug">{stat.title}</p>
+                  <div className={`p-1.5 rounded-md flex-shrink-0 ${stat.bgColor}`}>
+                    <Icon className={`h-3.5 w-3.5 ${stat.color}`} />
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {isLoading ? (
-                    <div className="h-8 w-16 bg-gray-200 animate-pulse rounded" />
-                  ) : (
-                    stat.value
-                  )}
+                <div className="text-2xl font-bold text-gray-900">
+                  {isLoading ? <div className="h-7 w-12 bg-gray-200 animate-pulse rounded" /> : stat.value}
                 </div>
               </CardContent>
             </Card>
@@ -96,14 +89,14 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Welcome message */}
+      {/* Welcome */}
       <Card>
-        <CardHeader>
-          <CardTitle>Welcome to TourneePro</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base md:text-lg">Bienvenue sur TourneePro</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-gray-600">
-            Your logistics management dashboard. Use the sidebar to navigate to different sections.
+          <p className="text-sm text-gray-600">
+            Plateforme de gestion logistique STP. Utilisez la navigation pour accéder aux différentes sections.
           </p>
         </CardContent>
       </Card>

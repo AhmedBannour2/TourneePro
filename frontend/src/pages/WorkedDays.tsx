@@ -26,7 +26,7 @@ interface ExpressMission {
 }
 interface WorkedDay {
   id: string; employeeId: string; tourId: string | null; date: string;
-  tourType: TourType; employeeRole: 'CHAUFFEUR' | 'AIDE';
+  tourType: TourType | null; employeeRole: 'CHAUFFEUR' | 'AIDE';
   basePay: number; overridePay: number | null; finalPay: number;
   status: WdStatus; confirmedAt: string | null;
   overrideNote: string | null; overrideById: string | null; overrideAt: string | null;
@@ -68,6 +68,20 @@ const DOT_COLOR: Record<TourType, string> = {
   MONO: 'bg-teal-500', SPECIAL: 'bg-pink-500',
 };
 
+// Express-only day (tourType === null) — yellow/gold
+const EXPRESS_CELL_BG    = 'bg-yellow-500';
+const EXPRESS_CELL_LIGHT = 'bg-yellow-50 border-yellow-200 text-yellow-900';
+const EXPRESS_TEXT       = 'text-yellow-700';
+const EXPRESS_DOT        = 'bg-yellow-500';
+
+function getTypeLabel(t: TourType | null)     { return t ? TYPE_LABEL[t]  : 'Express'; }
+function getCellLight(t: TourType | null)     { return t ? CELL_LIGHT[t]  : EXPRESS_CELL_LIGHT; }
+function getCellBg(t: TourType | null)        { return t ? CELL_BG[t]     : EXPRESS_CELL_BG; }
+function getDotColor(t: TourType | null)      { return t ? DOT_COLOR[t]   : EXPRESS_DOT; }
+function getCellTextColor(t: TourType | null) {
+  return t ? CELL_BG[t].replace('bg-', 'text-').replace('-500', '-700') : EXPRESS_TEXT;
+}
+
 // ── Calendar cell (same design as employee view) ───────────────────────────────
 
 function CalendarCell({
@@ -92,23 +106,29 @@ function CalendarCell({
     );
   }
 
+  const isExpress = wd.tourType === null;
+
   return (
     <button
       onClick={() => onClick(wd)}
-      className={`min-h-[72px] w-full rounded-xl border p-1.5 flex flex-col hover:shadow-md transition-all cursor-pointer ${CELL_LIGHT[wd.tourType]}`}
+      className={`min-h-[72px] w-full rounded-xl border p-1.5 flex flex-col hover:shadow-md transition-all cursor-pointer ${getCellLight(wd.tourType)}`}
     >
       <div className="flex items-center justify-between w-full">
         <span className="text-xs font-bold text-gray-600">{day}</span>
         <div className="flex gap-0.5">
           {wd.status === 'CONFIRMED' && <Lock size={9} className="opacity-50" />}
           {wd.overridePay != null && <Pencil size={9} className="opacity-50" />}
-          {wd.expressMissions.length > 0 && <Zap size={9} className="opacity-50" />}
+          {(wd.expressMissions.length > 0 || isExpress) && <Zap size={9} className="opacity-50" />}
         </div>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center mt-1">
-        <span className={`text-sm font-bold font-mono ${CELL_BG[wd.tourType].replace('bg-','text-').replace('-500','-700')}`}>
-          {wd.tour?.tourCode ?? '—'}
-        </span>
+        {isExpress ? (
+          <Zap size={14} className="text-yellow-600 opacity-80" />
+        ) : (
+          <span className={`text-sm font-bold font-mono ${getCellTextColor(wd.tourType)}`}>
+            {wd.tour?.tourCode ?? '—'}
+          </span>
+        )}
         <span className="text-xs font-semibold opacity-60 mt-0.5">{wd.finalPay}€</span>
       </div>
       {wd.status === 'ASSIGNED' && (
@@ -178,14 +198,20 @@ function AdminWdPanel({
 
         <div className="mt-4 space-y-4">
           {/* Date + tour header */}
-          <div className={`rounded-xl p-4 border ${wd.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' : CELL_LIGHT[wd.tourType]}`}>
+          <div className={`rounded-xl p-4 border ${wd.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' : getCellLight(wd.tourType)}`}>
             <p className="text-xs font-medium opacity-60 mb-1">{dateStr}</p>
             <div className="flex items-center gap-2">
-              {wd.tour
-                ? <span className="font-mono font-bold text-2xl">{wd.tour.tourCode}</span>
-                : <span className="text-lg font-semibold opacity-60">Journée manuelle</span>}
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${CELL_BG[wd.tourType]}`}>
-                {TYPE_LABEL[wd.tourType]}
+              {wd.tourType === null ? (
+                <span className="flex items-center gap-1.5 text-lg font-semibold text-yellow-700">
+                  <Zap size={18} className="text-yellow-500" /> Express uniquement
+                </span>
+              ) : wd.tour ? (
+                <span className="font-mono font-bold text-2xl">{wd.tour.tourCode}</span>
+              ) : (
+                <span className="text-lg font-semibold opacity-60">Journée manuelle</span>
+              )}
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${getCellBg(wd.tourType)}`}>
+                {getTypeLabel(wd.tourType)}
               </span>
             </div>
             {wd.tour && <p className="text-sm opacity-70 mt-0.5">{wd.tour.platform.name}</p>}
@@ -370,11 +396,12 @@ export default function WorkedDays() {
     const empTotalPay  = active.reduce((s, w) => s + w.finalPay, 0);
     const empConfirmed = active.filter(w => w.status === 'CONFIRMED').length;
     const empPending   = active.filter(w => w.status === 'ASSIGNED').length;
-    const empByType    = new Map<TourType, { count: number; pay: number }>();
+    const empByType    = new Map<TourType | null, { count: number; pay: number }>();
     for (const w of active) {
-      if (!empByType.has(w.tourType)) empByType.set(w.tourType, { count: 0, pay: 0 });
-      empByType.get(w.tourType)!.count++;
-      empByType.get(w.tourType)!.pay += w.finalPay;
+      const key = w.tourType;
+      if (!empByType.has(key)) empByType.set(key, { count: 0, pay: 0 });
+      empByType.get(key)!.count++;
+      empByType.get(key)!.pay += w.finalPay;
     }
     return { empTotalPay, empConfirmed, empPending, empByType };
   }, [workedDays]);
@@ -383,12 +410,12 @@ export default function WorkedDays() {
   const allEmpRows = useMemo(() => {
     if (!workedDays) return [];
     const map = new Map<string, {
-      name: string; days: number; confirmed: number; pending: number;
+      id: string; name: string; days: number; confirmed: number; pending: number;
       cancelled: number; totalPay: number;
     }>();
     for (const wd of workedDays) {
       const id = wd.employeeId;
-      if (!map.has(id)) map.set(id, { name: wd.employee.name, days: 0, confirmed: 0, pending: 0, cancelled: 0, totalPay: 0 });
+      if (!map.has(id)) map.set(id, { id, name: wd.employee.name, days: 0, confirmed: 0, pending: 0, cancelled: 0, totalPay: 0 });
       const row = map.get(id)!;
       if (wd.status === 'CANCELLED') { row.cancelled++; }
       else { row.days++; row.totalPay += wd.finalPay; }
@@ -408,7 +435,7 @@ export default function WorkedDays() {
   const selectedEmp = employees?.find(e => e.id === selectedEmpId);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 md:space-y-4">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
       {/* ── Top bar ────────────────────────────────────────────────────────── */}
@@ -429,6 +456,14 @@ export default function WorkedDays() {
 
           {/* Employee selector */}
           <div className="flex items-center gap-2">
+            {selectedEmpId !== 'all' && (
+              <button
+                onClick={() => { setSelectedEmpId('all'); setPanelWd(null); }}
+                className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 transition-colors border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 hover:border-blue-200"
+              >
+                <ChevronLeft size={14} /> Tous les employés
+              </button>
+            )}
             <Users size={16} className="text-gray-400" />
             <select
               value={selectedEmpId}
@@ -487,18 +522,10 @@ export default function WorkedDays() {
         </div>
       </div>
 
-      {/* ── Calendar ─────────────────────────────────────────────────────── */}
+      {/* ── Calendar / List ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border p-4">
-        {/* Day-of-week headers */}
-        <div className="grid grid-cols-7 mb-2">
-          {DAY_NAMES.map(d => (
-            <div key={d} className={`text-center text-xs font-semibold pb-2 ${d === 'Sam' || d === 'Dim' ? 'text-gray-400' : 'text-gray-500'}`}>
-              {d}
-            </div>
-          ))}
-        </div>
-
         {selectedEmpId === 'all' ? (
+          /* All-employees summary — table with horizontal scroll on mobile */
           isLoading ? (
             <div className="space-y-2">
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
@@ -506,83 +533,129 @@ export default function WorkedDays() {
           ) : allEmpRows.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">Aucune journée travaillée ce mois</div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 px-3 font-medium text-gray-500">Employé</th>
-                  <th className="text-center py-2 px-3 font-medium text-gray-500">Jours</th>
-                  <th className="text-center py-2 px-3 font-medium text-green-600">Confirmés</th>
-                  <th className="text-center py-2 px-3 font-medium text-yellow-600">En attente</th>
-                  <th className="text-center py-2 px-3 font-medium text-gray-400">Annulés</th>
-                  <th className="text-right py-2 px-3 font-medium text-gray-500">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {allEmpRows.map(row => (
-                  <tr key={row.name} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-3 font-medium text-gray-800">{row.name}</td>
-                    <td className="py-3 px-3 text-center text-gray-600">{row.days}</td>
-                    <td className="py-3 px-3 text-center">
-                      {row.confirmed > 0
-                        ? <span className="inline-flex items-center gap-1 text-green-700 font-semibold"><Lock size={11} />{row.confirmed}</span>
-                        : <span className="text-gray-300">—</span>}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      {row.pending > 0
-                        ? <span className="text-yellow-600 font-semibold">{row.pending}</span>
-                        : <span className="text-gray-300">—</span>}
-                    </td>
-                    <td className="py-3 px-3 text-center text-gray-400">
-                      {row.cancelled > 0 ? row.cancelled : <span className="text-gray-200">—</span>}
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-gray-800">
-                      {row.totalPay.toFixed(0)}€
-                    </td>
+            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+              <table className="w-full text-sm min-w-[480px]">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-2 px-3 font-medium text-gray-500">Employé</th>
+                    <th className="text-center py-2 px-3 font-medium text-gray-500">Jours</th>
+                    <th className="text-center py-2 px-3 font-medium text-green-600">Confirmés</th>
+                    <th className="text-center py-2 px-3 font-medium text-yellow-600">En attente</th>
+                    <th className="text-center py-2 px-3 font-medium text-gray-400">Annulés</th>
+                    <th className="text-right py-2 px-3 font-medium text-gray-500">Total</th>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-gray-200 bg-gray-50">
-                  <td className="py-2.5 px-3 font-bold text-gray-700">Total</td>
-                  <td className="py-2.5 px-3 text-center font-semibold text-gray-700">
-                    {allEmpRows.reduce((s, r) => s + r.days, 0)}
-                  </td>
-                  <td className="py-2.5 px-3 text-center font-semibold text-green-700">
-                    {allEmpRows.reduce((s, r) => s + r.confirmed, 0)}
-                  </td>
-                  <td className="py-2.5 px-3 text-center font-semibold text-yellow-600">
-                    {allEmpRows.reduce((s, r) => s + r.pending, 0)}
-                  </td>
-                  <td className="py-2.5 px-3 text-center text-gray-400">
-                    {allEmpRows.reduce((s, r) => s + r.cancelled, 0)}
-                  </td>
-                  <td className="py-2.5 px-3 text-right font-bold text-green-700 text-base">
-                    {allEmpRows.reduce((s, r) => s + r.totalPay, 0).toFixed(0)}€
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {allEmpRows.map(row => (
+                    <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="py-3 px-3">
+                        <button onClick={() => { setSelectedEmpId(row.id); setPanelWd(null); }}
+                          className="font-medium text-gray-800 hover:text-blue-700 hover:underline cursor-pointer text-left">
+                          {row.name}
+                        </button>
+                      </td>
+                      <td className="py-3 px-3 text-center text-gray-600">{row.days}</td>
+                      <td className="py-3 px-3 text-center">
+                        {row.confirmed > 0 ? <span className="inline-flex items-center gap-1 text-green-700 font-semibold"><Lock size={11} />{row.confirmed}</span> : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {row.pending > 0 ? <span className="text-yellow-600 font-semibold">{row.pending}</span> : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center text-gray-400">
+                        {row.cancelled > 0 ? row.cancelled : <span className="text-gray-200">—</span>}
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-gray-800">{row.totalPay.toFixed(0)}€</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-gray-50">
+                    <td className="py-2.5 px-3 font-bold text-gray-700">Total</td>
+                    <td className="py-2.5 px-3 text-center font-semibold text-gray-700">{allEmpRows.reduce((s, r) => s + r.days, 0)}</td>
+                    <td className="py-2.5 px-3 text-center font-semibold text-green-700">{allEmpRows.reduce((s, r) => s + r.confirmed, 0)}</td>
+                    <td className="py-2.5 px-3 text-center font-semibold text-yellow-600">{allEmpRows.reduce((s, r) => s + r.pending, 0)}</td>
+                    <td className="py-2.5 px-3 text-center text-gray-400">{allEmpRows.reduce((s, r) => s + r.cancelled, 0)}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-green-700 text-base">{allEmpRows.reduce((s, r) => s + r.totalPay, 0).toFixed(0)}€</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )
         ) : isLoading ? (
-          <div className="grid grid-cols-7 gap-1.5">
-            {Array.from({ length: 35 }).map((_, i) => (
-              <Skeleton key={i} className="h-[72px] rounded-xl" />
-            ))}
-          </div>
+          <>
+            <div className="hidden md:grid grid-cols-7 gap-1.5">
+              {Array.from({ length: 35 }).map((_, i) => <Skeleton key={i} className="h-[72px] rounded-xl" />)}
+            </div>
+            <div className="md:hidden space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
+            </div>
+          </>
         ) : (
-          <div className="grid grid-cols-7 gap-1.5">
-            {gridCells.map((day, i) => {
-              if (day === null) return <div key={`b-${i}`} className="min-h-[72px]" />;
-              return (
-                <CalendarCell
-                  key={day}
-                  day={day}
-                  wd={dayMap.get(day) ?? null}
-                  onClick={setPanelWd}
-                />
-              );
-            })}
-          </div>
+          <>
+            {/* Desktop: 7-column calendar grid */}
+            <div className="hidden md:block">
+              <div className="grid grid-cols-7 mb-2">
+                {DAY_NAMES.map(d => (
+                  <div key={d} className={`text-center text-xs font-semibold pb-2 ${d === 'Sam' || d === 'Dim' ? 'text-gray-400' : 'text-gray-500'}`}>{d}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {gridCells.map((day, i) => {
+                  if (day === null) return <div key={`b-${i}`} className="min-h-[72px]" />;
+                  return <CalendarCell key={day} day={day} wd={dayMap.get(day) ?? null} onClick={setPanelWd} />;
+                })}
+              </div>
+            </div>
+
+            {/* Mobile: vertical list of worked days */}
+            <div className="block md:hidden">
+              {(workedDays ?? []).length === 0 ? (
+                <div className="text-center py-12 text-gray-400 text-sm">Aucune journée ce mois</div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {[...(workedDays ?? [])]
+                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                    .map(wd => {
+                      const d = new Date(wd.date);
+                      const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                      const statusIcon = wd.status === 'CONFIRMED' ? '✓' : wd.status === 'CANCELLED' ? '✕' : '·';
+                      const statusColor = wd.status === 'CONFIRMED' ? 'text-green-600' : wd.status === 'CANCELLED' ? 'text-gray-400' : 'text-yellow-600';
+                      return (
+                        <button
+                          key={wd.id}
+                          onClick={() => setPanelWd(wd)}
+                          className="w-full text-left flex justify-between items-center py-3 px-1 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                        >
+                          {/* Left: date + tour code + type badge */}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-1.5 h-full min-h-[32px] rounded-full flex-shrink-0 ${getCellBg(wd.tourType)}`} />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-semibold leading-snug">{dateStr}</span>
+                                {wd.tour && <span className="text-xs text-gray-500 font-mono">{wd.tour.tourCode}</span>}
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${getCellLight(wd.tourType)}`}>
+                                  {getTypeLabel(wd.tourType)}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-400 leading-snug">
+                                {wd.employeeRole === 'CHAUFFEUR' ? 'Chauffeur' : 'Aide'}
+                                {wd.tour?.platform && <> · {wd.tour.platform.name}</>}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Right: pay + status */}
+                          <div className="flex-shrink-0 text-right ml-2">
+                            <div className="text-sm font-bold text-gray-900">{wd.finalPay.toFixed(0)}€</div>
+                            <div className={`text-xs font-medium ${statusColor}`}>{statusIcon} {wd.status === 'CONFIRMED' ? 'Confirmé' : wd.status === 'CANCELLED' ? 'Annulé' : 'Attente'}</div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  }
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -594,10 +667,13 @@ export default function WorkedDays() {
           </h3>
           <div className="space-y-2">
             {Array.from(empByType.entries()).map(([type, { count, pay }]) => (
-              <div key={type} className="flex items-center justify-between">
+              <div key={type ?? 'EXPRESS'} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${DOT_COLOR[type]}`} />
-                  <span className="text-sm text-gray-700">{TYPE_LABEL[type]}</span>
+                  <span className={`w-2 h-2 rounded-full ${getDotColor(type)}`} />
+                  <span className="text-sm text-gray-700 flex items-center gap-1">
+                    {type === null && <Zap size={11} className="text-yellow-500" />}
+                    {getTypeLabel(type)}
+                  </span>
                   <span className="text-xs text-gray-400">{count}×</span>
                 </div>
                 <span className="font-semibold text-gray-800">{pay.toFixed(0)}€</span>

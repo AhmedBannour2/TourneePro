@@ -1,35 +1,36 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsUUID, IsEnum } from 'class-validator';
-
-export enum ExpressDeliveryStatus {
-  PENDING = 'PENDING',
-  ASSIGNED = 'ASSIGNED',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
-}
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsEnum,
+  IsDateString,
+  IsOptional,
+  IsArray,
+  IsUUID,
+  IsString,
+  ArrayMaxSize,
+} from 'class-validator';
+import { ExpressDeliveryType } from '@prisma/client';
 
 export class CreateExpressDeliveryDto {
-  @ApiProperty({ description: 'Delivery address', example: '123 Rue de la Paix, 75001 Paris' })
-  @IsString()
-  @IsNotEmpty()
-  address!: string;
+  @ApiProperty({ enum: ExpressDeliveryType, description: 'STANDARD (30€) or GV (50€)' })
+  @IsEnum(ExpressDeliveryType)
+  type!: ExpressDeliveryType;
 
-  @ApiProperty({ description: 'Delivery date (ISO format)', example: '2026-05-27T10:00:00Z' })
+  @ApiProperty({ example: '2026-06-05T08:00:00Z', description: 'Delivery date/time (ISO)' })
   @IsDateString()
-  @IsNotEmpty()
   date!: string;
 
-  @ApiProperty({ description: 'Assigned employee ID', required: false })
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: 2,
+    description: 'Employee IDs to assign (max 2)',
+  })
   @IsOptional()
-  @IsUUID()
-  assigneeId?: string;
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @ArrayMaxSize(2)
+  employeeIds?: string[];
 
-  @ApiProperty({ description: 'Assigned truck ID', required: false })
-  @IsOptional()
-  @IsUUID()
-  truckId?: string;
-
-  @ApiProperty({ description: 'Delivery notes', required: false })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   notes?: string;

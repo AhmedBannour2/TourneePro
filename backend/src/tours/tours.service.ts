@@ -151,14 +151,10 @@ export class ToursService {
         where: { id: chauffeurId },
       });
       if (!chauffeur) {
-        throw new NotFoundException(
-          `Chauffeur with ID ${chauffeurId} not found`,
-        );
+        throw new NotFoundException(`Chauffeur with ID ${chauffeurId} not found`);
       }
       if (!chauffeur.isActive) {
-        throw new BadRequestException(
-          `Chauffeur ${chauffeur.name} is not active`,
-        );
+        throw new BadRequestException(`Chauffeur ${chauffeur.name} is not active`);
       }
     }
 
@@ -182,20 +178,12 @@ export class ToursService {
         throw new NotFoundException(`Truck with ID ${truckId} not found`);
       }
       if (!truck.isAvailable) {
-        throw new BadRequestException(
-          `Truck ${truck.immatriculation} is not available`,
-        );
+        throw new BadRequestException(`Truck ${truck.immatriculation} is not available`);
       }
     }
 
     // Check for same-day conflicts (warning, not blocking)
-    const conflicts = await this.checkSameDayConflicts(
-      tour.date,
-      chauffeurId,
-      aideId,
-      truckId,
-      id,
-    );
+    const conflicts = await this.checkSameDayConflicts(tour.date, chauffeurId, aideId, truckId, id);
 
     if (conflicts.length > 0) {
       this.logger.warn(
@@ -485,6 +473,28 @@ export class ToursService {
     return 'Standard';
   }
 
+  // ── Delete tour ──────────────────────────────────────────────────────────
+
+  async deleteTour(id: string) {
+    const tour = await this.findOne(id);
+
+    const isAssigned = ['assigned', 'notified', 'completed'].includes(tour.status);
+    if (isAssigned) {
+      throw new BadRequestException('Unassign the tour before deleting it');
+    }
+
+    // Cancel any ASSIGNED worked days linked to this tour
+    await this.prisma.workedDay.updateMany({
+      where: { tourId: id, status: WorkedDayStatus.ASSIGNED },
+      data: { status: WorkedDayStatus.CANCELLED },
+    });
+
+    // Delete the tour (cascade handles: assignments, confirmation)
+    await this.prisma.tour.delete({ where: { id } });
+
+    return { id, deleted: true };
+  }
+
   // ── Tour confirmation ─────────────────────────────────────────────────────
 
   async confirmTour(tourId: string, dto: ConfirmTourDto, userId: string) {
@@ -500,9 +510,7 @@ export class ToursService {
     }
 
     if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException(
-        'Delivered + absent + non-conform exceeds total clients',
-      );
+      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
     }
 
     const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
@@ -533,6 +541,71 @@ export class ToursService {
     return confirmation;
   }
 
+  // ── Admin confirm (no employee check) ───────────────────────────────────
+
+  async adminConfirmTour(tourId: string, dto: ConfirmTourDto) {
+    const tour = await this.findOne(tourId);
+    const assignment = tour.assignments[0];
+    if (!assignment) throw new BadRequestException('Tour is not assigned yet');
+
+    const employeeId = assignment.chauffeurId ?? assignment.aideId;
+    if (!employeeId) throw new BadRequestException('No employee is linked to this assignment');
+
+    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    }
+
+    const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
+    if (existing) throw new BadRequestException('Tour already confirmed — use PATCH to update');
+
+    const [confirmation] = await this.prisma.$transaction([
+      this.prisma.tourConfirmation.create({
+        data: {
+          tourId,
+          confirmedById: employeeId,
+          totalClients: dto.totalClients,
+          delivered: dto.delivered,
+          absent: dto.absent,
+          nonConform: dto.nonConform,
+          notes: dto.notes ?? null,
+        },
+        include: { confirmedBy: { select: { id: true, name: true } } },
+      }),
+      this.prisma.tour.update({
+        where: { id: tourId },
+        data: { confirmationStatus: ConfirmationStatus.CONFIRMED },
+      }),
+    ]);
+
+    await this.ensureAndConfirmWorkedDays(tourId, tour);
+    return confirmation;
+  }
+
+  async adminUpdateConfirmation(tourId: string, dto: ConfirmTourDto) {
+    const confirmation = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
+    if (!confirmation) throw new NotFoundException('No confirmation found for this tour');
+
+    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    }
+
+    const updated = await this.prisma.tourConfirmation.update({
+      where: { tourId },
+      data: {
+        totalClients: dto.totalClients,
+        delivered: dto.delivered,
+        absent: dto.absent,
+        nonConform: dto.nonConform,
+        notes: dto.notes ?? null,
+      },
+      include: { confirmedBy: { select: { id: true, name: true } } },
+    });
+
+    const tour = await this.findOne(tourId);
+    await this.ensureAndConfirmWorkedDays(tourId, tour);
+    return updated;
+  }
+
   async updateConfirmation(tourId: string, dto: ConfirmTourDto, userId: string) {
     const employee = await this.prisma.employee.findUnique({ where: { userId } });
     if (!employee) throw new ForbiddenException('No employee profile linked to this account');
@@ -544,9 +617,7 @@ export class ToursService {
     }
 
     if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException(
-        'Delivered + absent + non-conform exceeds total clients',
-      );
+      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
     }
 
     const updated = await this.prisma.tourConfirmation.update({
@@ -604,43 +675,42 @@ export class ToursService {
     const startOfToday = new Date(today.setHours(0, 0, 0, 0));
     const endOfToday = new Date(today.setHours(23, 59, 59, 999));
 
-    const [toursToday, unassignedToday, activeEmployees, recentImportErrors] =
-      await Promise.all([
-        this.prisma.tour.count({
-          where: {
-            date: {
-              gte: startOfToday,
-              lte: endOfToday,
+    const [toursToday, unassignedToday, activeEmployees, recentImportErrors] = await Promise.all([
+      this.prisma.tour.count({
+        where: {
+          date: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+        },
+      }),
+      this.prisma.tour.count({
+        where: {
+          date: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+          status: {
+            notIn: ['assigned', 'notified', 'completed', 'cancelled'],
+          },
+        },
+      }),
+      this.prisma.employee.count({
+        where: {
+          isActive: true,
+        },
+      }),
+      this.prisma.importRow.count({
+        where: {
+          status: 'error',
+          batch: {
+            uploadedAt: {
+              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
             },
           },
-        }),
-        this.prisma.tour.count({
-          where: {
-            date: {
-              gte: startOfToday,
-              lte: endOfToday,
-            },
-            status: {
-              notIn: ['assigned', 'notified', 'completed', 'cancelled'],
-            },
-          },
-        }),
-        this.prisma.employee.count({
-          where: {
-            isActive: true,
-          },
-        }),
-        this.prisma.importRow.count({
-          where: {
-            status: 'error',
-            batch: {
-              uploadedAt: {
-                gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
-              },
-            },
-          },
-        }),
-      ]);
+        },
+      }),
+    ]);
 
     return {
       toursToday,
@@ -676,9 +746,7 @@ export class ToursService {
 
     return this.prisma.assignment.update({
       where: { id: assignment.id },
-      data: isChauffeur
-        ? { chauffeurSeenAt: new Date() }
-        : { aideSeenAt: new Date() },
+      data: isChauffeur ? { chauffeurSeenAt: new Date() } : { aideSeenAt: new Date() },
     });
   }
 

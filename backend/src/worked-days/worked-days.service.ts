@@ -5,12 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  TourType,
-  EmployeeRole,
-  WorkedDayStatus,
-  ExpressMissionType,
-} from '@prisma/client';
+import { TourType, EmployeeRole, WorkedDayStatus, ExpressMissionType } from '@prisma/client';
 import { GetWorkedDaysQueryDto } from './dto/get-worked-days-query.dto';
 import { OverrideWorkedDayDto } from './dto/override-worked-day.dto';
 import { AddExpressDto } from './dto/add-express.dto';
@@ -52,7 +47,14 @@ export function detectTourType(tourCode: string): TourType {
 
 const WORKED_DAY_INCLUDE = {
   employee: { select: { id: true, name: true, firstName: true, lastName: true, role: true } },
-  tour: { select: { id: true, tourCode: true, date: true, platform: { select: { name: true, code: true } } } },
+  tour: {
+    select: {
+      id: true,
+      tourCode: true,
+      date: true,
+      platform: { select: { name: true, code: true } },
+    },
+  },
   expressMissions: {
     include: { addedBy: { select: { id: true, email: true } } },
     orderBy: { addedAt: 'asc' as const },
@@ -66,19 +68,24 @@ export class WorkedDaysService {
 
   // ── Pay rate lookup ────────────────────────────────────────────────────────
 
-  async getPayRate(
-    employeeId: string,
-    tourType: TourType,
-    role: EmployeeRole,
-  ): Promise<number> {
+  async getPayRate(employeeId: string, tourType: TourType, role: EmployeeRole): Promise<number> {
+    // Priority 1: employee-specific override
     const custom = await this.prisma.employeePayRate.findUnique({
       where: { employeeId_tourType: { employeeId, tourType } },
     });
-    const defaults = SYSTEM_PAY_DEFAULTS[tourType];
-    if (role === EmployeeRole.CHAUFFEUR) {
-      return custom?.chauffeurRate ?? defaults.chauffeurRate;
+    if (custom) {
+      return role === EmployeeRole.CHAUFFEUR ? custom.chauffeurRate : (custom.aideRate ?? 0);
     }
-    return custom?.aideRate ?? defaults.aideRate ?? 0;
+
+    // Priority 2: global pay rate set by dispatcher
+    const global = await this.prisma.globalPayRate.findUnique({ where: { tourType } });
+    if (global) {
+      return role === EmployeeRole.CHAUFFEUR ? global.chauffeurRate : (global.aideRate ?? 0);
+    }
+
+    // Priority 3: hardcoded system fallback
+    const defaults = SYSTEM_PAY_DEFAULTS[tourType];
+    return role === EmployeeRole.CHAUFFEUR ? defaults.chauffeurRate : (defaults.aideRate ?? 0);
   }
 
   // ── finalPay recalculation ─────────────────────────────────────────────────
@@ -320,7 +327,10 @@ export class WorkedDaysService {
 
   // ── Summary (dispatcher payroll view) ─────────────────────────────────────
 
-  async getSummary(query: { month?: number; year?: number }): Promise<WorkedDaysSummaryResponseDto> {
+  async getSummary(query: {
+    month?: number;
+    year?: number;
+  }): Promise<WorkedDaysSummaryResponseDto> {
     const m = query.month ?? new Date().getMonth() + 1;
     const y = query.year ?? new Date().getFullYear();
     const startOfMonth = new Date(y, m - 1, 1);
@@ -350,10 +360,10 @@ export class WorkedDaysService {
       const unconfirmed = days.filter((d) => d.status === WorkedDayStatus.ASSIGNED);
       const totalFinalPay = nonCancelled.reduce((s, d) => s + d.finalPay, 0);
 
-      // Group by tour type
+      // Group by tour type (null = express-only day)
       const tourTypeMap = new Map<string, { count: number; totalPay: number }>();
       for (const d of nonCancelled) {
-        const tt = d.tourType;
+        const tt = d.tourType ?? 'EXPRESS';
         if (!tourTypeMap.has(tt)) tourTypeMap.set(tt, { count: 0, totalPay: 0 });
         const entry = tourTypeMap.get(tt)!;
         entry.count++;
@@ -378,16 +388,10 @@ export class WorkedDaysService {
       };
     });
 
-    const totalWorkedDays = workedDays.filter(
-      (d) => d.status !== WorkedDayStatus.CANCELLED,
-    ).length;
+    const totalWorkedDays = workedDays.filter((d) => d.status !== WorkedDayStatus.CANCELLED).length;
     const totalPayroll = employees.reduce((s, e) => s + e.totalFinalPay, 0);
-    const unconfirmedDays = workedDays.filter(
-      (d) => d.status === WorkedDayStatus.ASSIGNED,
-    ).length;
-    const cancelledDays = workedDays.filter(
-      (d) => d.status === WorkedDayStatus.CANCELLED,
-    ).length;
+    const unconfirmedDays = workedDays.filter((d) => d.status === WorkedDayStatus.ASSIGNED).length;
+    const cancelledDays = workedDays.filter((d) => d.status === WorkedDayStatus.CANCELLED).length;
 
     return {
       month: m,
@@ -415,9 +419,7 @@ export class WorkedDaysService {
         chauffeurRate: c?.chauffeurRate ?? defaults.chauffeurRate,
         aideRate: c?.aideRate !== undefined ? c.aideRate : defaults.aideRate,
         isCustomChauffeur: c !== undefined && c.chauffeurRate !== defaults.chauffeurRate,
-        isCustomAide:
-          c !== undefined &&
-          (c.aideRate ?? null) !== defaults.aideRate,
+        isCustomAide: c !== undefined && (c.aideRate ?? null) !== defaults.aideRate,
         systemChauffeurRate: defaults.chauffeurRate,
         systemAideRate: defaults.aideRate,
       };

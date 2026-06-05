@@ -243,7 +243,7 @@ export default function EmployeeDashboard() {
   }
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-6 md:space-y-8 w-full max-w-3xl">
       {/* Greeting */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">

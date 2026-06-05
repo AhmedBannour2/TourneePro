@@ -3,6 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
+export interface InspectionRequestParams {
+  to: string;
+  employeeName: string;
+  truckImmatriculation: string;
+  scheduledDate: Date;
+}
+
+export interface InspectionProblemParams {
+  to: string;
+  truckImmatriculation: string;
+  employeeName: string;
+  problemItems: { item: string; comment: string | null }[];
+  generalComment: string | null;
+  scheduledDate: Date;
+}
+
 export interface AssignmentNotificationParams {
   to: string;
   employeeName: string;
@@ -50,8 +66,7 @@ export class MailService implements OnModuleInit {
       return;
     }
 
-    const from =
-      this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
 
     const subject = `Tournée ${params.tourCode} assignée — ${this.formatDate(params.tourDate)}`;
 
@@ -62,8 +77,81 @@ export class MailService implements OnModuleInit {
       html: this.buildHtml(params),
     });
 
+    this.logger.log(`Assignment email sent to ${params.to} (tour ${params.tourCode})`);
+  }
+
+  async sendInspectionRequestEmail(params: InspectionRequestParams): Promise<void> {
+    if (!this.transporter) return;
+    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    const firstName = params.employeeName.split(' ')[0];
+    const dateStr = this.formatDate(params.scheduledDate);
+    await this.transporter.sendMail({
+      from,
+      to: params.to,
+      subject: `Contrôle à effectuer — ${params.truckImmatriculation} — ${dateStr}`,
+      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
+          <div style="background:#1d4ed8;padding:24px 32px;">
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">🚚 TourneePro</p>
+            <p style="margin:4px 0 0;color:#93c5fd;font-size:13px;">Contrôle technique hebdomadaire</p>
+          </div>
+          <div style="padding:32px;">
+            <p style="margin:0 0 16px;font-size:18px;font-weight:700;">Bonjour, ${firstName}&nbsp;!</p>
+            <p style="margin:0 0 24px;color:#4b5563;">Un contrôle technique est à effectuer pour votre camion.</p>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px 24px;">
+              <p style="margin:0 0 4px;font-size:11px;color:#3b82f6;font-weight:700;text-transform:uppercase;">Camion</p>
+              <p style="margin:0 0 16px;font-size:26px;font-weight:800;color:#1e40af;">${params.truckImmatriculation}</p>
+              <p style="margin:0;font-size:14px;color:#374151;">📅 À effectuer le : <strong>${dateStr}</strong></p>
+            </div>
+            <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">Connectez-vous à TourneePro pour soumettre votre contrôle.</p>
+          </div>
+        </div>
+      </body></html>`,
+    });
     this.logger.log(
-      `Assignment email sent to ${params.to} (tour ${params.tourCode})`,
+      `Inspection request email sent to ${params.to} (truck ${params.truckImmatriculation})`,
+    );
+  }
+
+  async sendInspectionProblemEmail(params: InspectionProblemParams): Promise<void> {
+    if (!this.transporter) return;
+    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    const dateStr = this.formatDate(params.scheduledDate);
+    const itemLabels: Record<string, string> = {
+      HUILE: "Niveau d'huile",
+      RADIATEUR: 'Eau du radiateur',
+      CAISSE_OUTILS: 'Caisse à outils',
+      CHARIOT: 'Chariot',
+      ROULETTES: 'Roulettes',
+      COUVERCLE: 'Couvercle de produit',
+    };
+    const itemRows = params.problemItems
+      .map(
+        (i) =>
+          `<tr><td style="padding:8px 0;color:#dc2626;font-weight:600;">${itemLabels[i.item] ?? i.item}</td>` +
+          `<td style="padding:8px 0 8px 16px;color:#374151;">${i.comment ?? '—'}</td></tr>`,
+      )
+      .join('');
+    await this.transporter.sendMail({
+      from,
+      to: params.to,
+      subject: `⚠️ Problème signalé — ${params.truckImmatriculation} — ${dateStr}`,
+      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
+          <div style="background:#dc2626;padding:24px 32px;">
+            <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">⚠️ TourneePro — Problème signalé</p>
+          </div>
+          <div style="padding:32px;">
+            <p style="margin:0 0 8px;font-size:16px;color:#111827;">Le contrôle de <strong>${params.truckImmatriculation}</strong> du <strong>${dateStr}</strong> signale des anomalies.</p>
+            <p style="margin:0 0 16px;font-size:14px;color:#6b7280;">Effectué par : ${params.employeeName}</p>
+            <table style="width:100%;border-collapse:collapse;">${itemRows}</table>
+            ${params.generalComment ? `<div style="margin-top:16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;"><p style="margin:0;font-size:13px;color:#991b1b;"><strong>Commentaire général :</strong> ${params.generalComment}</p></div>` : ''}
+          </div>
+        </div>
+      </body></html>`,
+    });
+    this.logger.log(
+      `Inspection problem email sent to ${params.to} (truck ${params.truckImmatriculation})`,
     );
   }
 
@@ -80,20 +168,16 @@ export class MailService implements OnModuleInit {
 
   private buildHtml(p: AssignmentNotificationParams): string {
     const firstName = p.employeeName.split(' ')[0];
-    const roleLabel =
-      p.role === 'chauffeur' ? 'Chauffeur-livreur' : 'Aide-livreur';
-    const partnerLabel =
-      p.role === 'chauffeur' ? 'Aide-livreur' : 'Chauffeur-livreur';
+    const roleLabel = p.role === 'chauffeur' ? 'Chauffeur-livreur' : 'Aide-livreur';
+    const partnerLabel = p.role === 'chauffeur' ? 'Aide-livreur' : 'Chauffeur-livreur';
 
     const details: Array<{ icon: string; label: string; value: string }> = [
       { icon: '📅', label: 'Date', value: this.formatDate(p.tourDate) },
       { icon: '🏭', label: 'Platform', value: p.platformName },
     ];
     if (p.quai) details.push({ icon: '🚪', label: 'Quai', value: p.quai });
-    if (p.horaire)
-      details.push({ icon: '⏰', label: 'Horaire', value: p.horaire });
-    if (p.partnerName)
-      details.push({ icon: '👤', label: partnerLabel, value: p.partnerName });
+    if (p.horaire) details.push({ icon: '⏰', label: 'Horaire', value: p.horaire });
+    if (p.partnerName) details.push({ icon: '👤', label: partnerLabel, value: p.partnerName });
     if (p.truckImmatriculation)
       details.push({
         icon: '🚛',

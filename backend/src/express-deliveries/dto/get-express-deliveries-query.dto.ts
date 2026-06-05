@@ -1,14 +1,30 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsDateString, IsString } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsDateString, IsEnum, IsUUID } from 'class-validator';
+import { ExpressDeliveryType, ExpressDeliveryStatus } from '@prisma/client';
 
 export class GetExpressDeliveriesQueryDto {
-  @ApiProperty({ description: 'Filter by date (ISO format)', required: false, example: '2026-05-27' })
+  @ApiPropertyOptional({ example: '2026-06-01' })
   @IsOptional()
   @IsDateString()
-  date?: string;
+  dateFrom?: string;
 
-  @ApiProperty({ description: 'Filter by status', required: false, example: 'PENDING' })
+  @ApiPropertyOptional({ example: '2026-06-30' })
   @IsOptional()
-  @IsString()
-  status?: string;
+  @IsDateString()
+  dateTo?: string;
+
+  @ApiPropertyOptional({ enum: ExpressDeliveryType })
+  @IsOptional()
+  @IsEnum(ExpressDeliveryType)
+  type?: ExpressDeliveryType;
+
+  @ApiPropertyOptional({ enum: ExpressDeliveryStatus })
+  @IsOptional()
+  @IsEnum(ExpressDeliveryStatus)
+  status?: ExpressDeliveryStatus;
+
+  @ApiPropertyOptional({ description: 'Filter by assigned employee ID' })
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
 }

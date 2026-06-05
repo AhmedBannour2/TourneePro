@@ -18,7 +18,7 @@ type WdStatus = 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
 
 interface ExpressMission { id: string; type: string; pay: number; notes: string | null }
 interface WorkedDay {
-  id: string; employeeId: string; date: string; tourType: TourType;
+  id: string; employeeId: string; date: string; tourType: TourType | null;
   employeeRole: 'CHAUFFEUR' | 'AIDE'; basePay: number; overridePay: number | null;
   finalPay: number; status: WdStatus; confirmedAt: string | null; overrideNote: string | null;
   employee: { id: string; name: string };
@@ -54,6 +54,23 @@ const DOT_COLOR: Record<TourType, string> = {
   STANDARD: 'bg-blue-500', GV: 'bg-violet-500', INSTALL: 'bg-amber-500', MONO: 'bg-teal-500', SPECIAL: 'bg-pink-500',
 };
 
+// Express-only day (tourType === null)
+const EXPRESS_CELL_BG    = 'bg-yellow-500';
+const EXPRESS_CELL_LIGHT = 'bg-yellow-50 border-yellow-200 text-yellow-900';
+const EXPRESS_TEXT       = 'text-yellow-700';
+const EXPRESS_DOT        = 'bg-yellow-500';
+
+// Null-safe helpers — use these everywhere instead of direct record lookups
+function getTypeLabel(t: TourType | null)     { return t ? TYPE_LABEL[t]  : 'Express'; }
+function getCellLight(t: TourType | null)     { return t ? CELL_LIGHT[t]  : EXPRESS_CELL_LIGHT; }
+function getCellBg(t: TourType | null)        { return t ? CELL_BG[t]     : EXPRESS_CELL_BG; }
+function getDotColor(t: TourType | null)      { return t ? DOT_COLOR[t]   : EXPRESS_DOT; }
+function getCellTextColor(t: TourType | null) {
+  return t
+    ? CELL_BG[t].replace('bg-', 'text-').replace('-500', '-700')
+    : EXPRESS_TEXT;
+}
+
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
 function WdPanel({ wd, onClose, onRefresh }: { wd: WorkedDay | null; onClose: () => void; onRefresh: () => void }) {
@@ -83,14 +100,19 @@ function WdPanel({ wd, onClose, onRefresh }: { wd: WorkedDay | null; onClose: ()
 
         <div className="mt-4 space-y-4">
           {/* Date + tour */}
-          <div className={`rounded-xl p-4 border ${wd.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' : CELL_LIGHT[wd.tourType]}`}>
+          <div className={`rounded-xl p-4 border ${wd.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' : getCellLight(wd.tourType)}`}>
             <p className="text-xs font-medium opacity-60 mb-1">{dateStr}</p>
             {wd.tour ? (
               <div className="flex items-center gap-2">
                 <span className="font-mono font-bold text-2xl">{wd.tour.tourCode}</span>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${CELL_BG[wd.tourType]}`}>
-                  {TYPE_LABEL[wd.tourType]}
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${getCellBg(wd.tourType)}`}>
+                  {getTypeLabel(wd.tourType)}
                 </span>
+              </div>
+            ) : wd.tourType === null ? (
+              <div className="flex items-center gap-2">
+                <Zap size={20} className="text-yellow-500" />
+                <span className="text-lg font-semibold text-yellow-700">Journée Express uniquement</span>
               </div>
             ) : (
               <span className="text-lg font-semibold opacity-60">Journée manuelle</span>
@@ -112,7 +134,7 @@ function WdPanel({ wd, onClose, onRefresh }: { wd: WorkedDay | null; onClose: ()
           {/* Pay breakdown */}
           <div className="bg-white border rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">{TYPE_LABEL[wd.tourType]} — {wd.employeeRole === 'CHAUFFEUR' ? 'Chauffeur' : 'Aide'}</span>
+              <span className="text-gray-500">{getTypeLabel(wd.tourType)} — {wd.employeeRole === 'CHAUFFEUR' ? 'Chauffeur' : 'Aide'}</span>
               <span className="font-semibold">{wd.overridePay ?? wd.basePay}€</span>
             </div>
             {expressTotal > 0 && (
@@ -186,22 +208,28 @@ function CalendarCell({ wd, day, isToday, onClick }: {
     );
   }
 
+  const isExpress = wd.tourType === null;
+
   return (
     <button
       onClick={() => onClick(wd)}
-      className={`min-h-16 w-full rounded-xl border p-1.5 flex flex-col hover:shadow-md transition-all cursor-pointer ${CELL_LIGHT[wd.tourType]} ${todayRing}`}
+      className={`min-h-16 w-full rounded-xl border p-1.5 flex flex-col hover:shadow-md transition-all cursor-pointer ${getCellLight(wd.tourType)} ${todayRing}`}
     >
       <div className="flex items-center justify-between w-full">
         <span className={`text-xs font-bold ${isToday ? 'text-blue-600' : ''}`}>{day}</span>
         <div className="flex gap-0.5">
           {wd.status === 'CONFIRMED' && <Lock size={9} className="opacity-60" />}
-          {wd.expressMissions.length > 0 && <Zap size={9} className="opacity-60" />}
+          {(wd.expressMissions.length > 0 || isExpress) && <Zap size={9} className="opacity-60" />}
         </div>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center mt-1">
-        <span className={`text-sm font-bold font-mono ${CELL_BG[wd.tourType].replace('bg-', 'text-').replace('-500', '-700')}`}>
-          {wd.tour?.tourCode ?? '—'}
-        </span>
+        {isExpress ? (
+          <Zap size={14} className="text-yellow-600 opacity-80" />
+        ) : (
+          <span className={`text-sm font-bold font-mono ${getCellTextColor(wd.tourType)}`}>
+            {wd.tour?.tourCode ?? '—'}
+          </span>
+        )}
         <span className="text-xs font-semibold mt-0.5 opacity-70">{wd.finalPay}€</span>
       </div>
       {wd.status === 'ASSIGNED' && (
@@ -270,11 +298,12 @@ export default function MyWorkedDays() {
     const totalPay = active.reduce((s, w) => s + w.finalPay, 0);
     const confirmedCount = active.filter(w => w.status === 'CONFIRMED').length;
     const pendingCount   = active.filter(w => w.status === 'ASSIGNED').length;
-    const byType = new Map<TourType, { count: number; pay: number }>();
+    const byType = new Map<TourType | null, { count: number; pay: number }>();
     for (const w of active) {
-      if (!byType.has(w.tourType)) byType.set(w.tourType, { count: 0, pay: 0 });
-      byType.get(w.tourType)!.count++;
-      byType.get(w.tourType)!.pay += w.finalPay;
+      const key = w.tourType;
+      if (!byType.has(key)) byType.set(key, { count: 0, pay: 0 });
+      byType.get(key)!.count++;
+      byType.get(key)!.pay += w.finalPay;
     }
     return { totalPay, confirmedCount, pendingCount, byType };
   }, [workedDays]);
@@ -370,10 +399,13 @@ export default function MyWorkedDays() {
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Récapitulatif du mois</h3>
           <div className="space-y-2">
             {Array.from(byType.entries()).map(([type, { count, pay }]) => (
-              <div key={type} className="flex items-center justify-between">
+              <div key={type ?? 'EXPRESS'} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${DOT_COLOR[type]}`} />
-                  <span className="text-sm text-gray-700">{TYPE_LABEL[type]}</span>
+                  <span className={`w-2 h-2 rounded-full ${getDotColor(type)}`} />
+                  <span className="text-sm text-gray-700 flex items-center gap-1">
+                    {type === null && <Zap size={11} className="text-yellow-500" />}
+                    {getTypeLabel(type)}
+                  </span>
                   <span className="text-xs text-gray-400">{count}×</span>
                 </div>
                 <span className="font-semibold text-gray-800">{pay.toFixed(0)}€</span>

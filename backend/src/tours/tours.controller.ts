@@ -14,13 +14,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/dto/register.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { ToursService } from './tours.service';
 import { GetToursQueryDto } from './dto/get-tours-query.dto';
 import { AssignTourDto } from './dto/assign-tour.dto';
@@ -75,13 +69,20 @@ export class ToursController {
   @ApiResponse({ status: 200, description: 'Tour assigned successfully' })
   @ApiResponse({ status: 404, description: 'Tour not found' })
   @ApiResponse({ status: 400, description: 'Invalid assignment data' })
-  assignTour(
-    @Param('id') id: string,
-    @Body() assignDto: AssignTourDto,
-    @Req() req: any,
-  ) {
+  assignTour(@Param('id') id: string, @Body() assignDto: AssignTourDto, @Req() req: any) {
     const userId = req.user?.userId;
     return this.toursService.assignTour(id, assignDto, userId);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Delete a tour (only if not assigned)' })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  @ApiResponse({ status: 200, description: 'Tour deleted' })
+  @ApiResponse({ status: 400, description: 'Tour is assigned — unassign first' })
+  deleteTour(@Param('id') id: string) {
+    return this.toursService.deleteTour(id);
   }
 
   @Delete(':id/assignment')
@@ -95,15 +96,31 @@ export class ToursController {
     return this.toursService.unassignTour(id, userId);
   }
 
+  @Post(':id/confirm-admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Admin/dispatcher confirms tour delivery details on behalf of the team',
+  })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  adminConfirmTour(@Param('id') id: string, @Body() dto: ConfirmTourDto) {
+    return this.toursService.adminConfirmTour(id, dto);
+  }
+
+  @Patch(':id/confirm-admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Admin/dispatcher updates a tour confirmation' })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  adminUpdateConfirmation(@Param('id') id: string, @Body() dto: ConfirmTourDto) {
+    return this.toursService.adminUpdateConfirmation(id, dto);
+  }
+
   @Post(':id/confirm')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Employee confirms tour delivery details' })
   @ApiParam({ name: 'id', description: 'Tour UUID' })
-  confirmTour(
-    @Param('id') id: string,
-    @Body() dto: ConfirmTourDto,
-    @Req() req: any,
-  ) {
+  confirmTour(@Param('id') id: string, @Body() dto: ConfirmTourDto, @Req() req: any) {
     return this.toursService.confirmTour(id, dto, req.user.id);
   }
 
@@ -111,11 +128,7 @@ export class ToursController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Employee edits their tour confirmation' })
   @ApiParam({ name: 'id', description: 'Tour UUID' })
-  updateConfirmation(
-    @Param('id') id: string,
-    @Body() dto: ConfirmTourDto,
-    @Req() req: any,
-  ) {
+  updateConfirmation(@Param('id') id: string, @Body() dto: ConfirmTourDto, @Req() req: any) {
     return this.toursService.updateConfirmation(id, dto, req.user.id);
   }
 

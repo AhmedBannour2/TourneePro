@@ -85,7 +85,7 @@ export class ImportsService {
           tourCode: String(row.tourNumber),
           tourType: row.tourType,
           platform: row.platform,
-          date: row.date?.toISOString().split('T')[0] ?? null,
+          date: row.dateStr ?? null,
           horaire: row.horaire,
           quai: row.quai,
           nbColis: row.nbColis,
@@ -127,9 +127,7 @@ export class ImportsService {
         },
       });
 
-      this.logger.log(
-        `Batch ${batch.id} ready: ${result.stpRows.length} STP tours to import`,
-      );
+      this.logger.log(`Batch ${batch.id} ready: ${result.stpRows.length} STP tours to import`);
 
       return updatedBatch;
     } catch (err: any) {
@@ -160,12 +158,7 @@ export class ImportsService {
   /**
    * Get import rows with pagination and filtering
    */
-  async getImportRows(
-    batchId: string,
-    status?: string,
-    page: number = 1,
-    limit: number = 50,
-  ) {
+  async getImportRows(batchId: string, status?: string, page: number = 1, limit: number = 50) {
     const batch = await this.prisma.importBatch.findUnique({
       where: { id: batchId },
     });
@@ -251,7 +244,12 @@ export class ImportsService {
       }
 
       // Upsert platform atomically to avoid race conditions on concurrent commits
-      const platformName = data.platform === 'F166' ? 'Alfortville' : data.platform === 'GARONOR' ? 'Garonor' : data.platform;
+      const platformName =
+        data.platform === 'F166'
+          ? 'Alfortville'
+          : data.platform === 'GARONOR'
+            ? 'Garonor'
+            : data.platform;
       const platform = await this.prisma.platform.upsert({
         where: { code: data.platform },
         update: {},
@@ -302,9 +300,7 @@ export class ImportsService {
           toursCreated++;
         }
       } catch (err: any) {
-        this.logger.error(
-          `Failed to upsert tour ${data.tourCode} on ${data.date}: ${err.message}`,
-        );
+        this.logger.error(`Failed to upsert tour ${data.tourCode} on ${data.date}: ${err.message}`);
         toursSkipped++;
       }
     }
@@ -351,9 +347,7 @@ export class ImportsService {
     }
 
     if (!['pending', 'processing', 'preview'].includes(batch.status)) {
-      throw new BadRequestException(
-        `Cannot cancel batch with status ${batch.status}`,
-      );
+      throw new BadRequestException(`Cannot cancel batch with status ${batch.status}`);
     }
 
     await this.prisma.importBatch.update({

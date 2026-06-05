@@ -8,21 +8,24 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
   Request,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiParam,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { mkdirSync, existsSync } from 'fs';
+import { Logger } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { TrucksService } from './trucks.service';
 import { CreateTruckDto } from './dto/create-truck.dto';
 import { UpdateTruckDto } from './dto/update-truck.dto';
 import { CreateRepairLogDto } from './dto/create-repair-log.dto';
 import { UpdateTruckStatusDto } from './dto/update-truck-status.dto';
+import { SetResponsibleDto } from './dto/set-responsible.dto';
+import { CreateInspectionDto } from './dto/create-inspection.dto';
+import { SubmitInspectionDto } from './dto/submit-inspection.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators';
@@ -35,18 +38,12 @@ export class TrucksController {
   constructor(private readonly trucksService: TrucksService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new truck' })
-  @ApiResponse({ status: 201, description: 'Truck created successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 409, description: 'Truck with this immatriculation already exists' })
   create(@Body() createTruckDto: CreateTruckDto) {
     return this.trucksService.create(createTruckDto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all trucks' })
   @ApiQuery({ name: 'isAvailable', required: false, type: Boolean })
-  @ApiResponse({ status: 200, description: 'Returns all trucks' })
   findAll(@Query('isAvailable') isAvailable?: string) {
     const filter = isAvailable === 'true' ? true : isAvailable === 'false' ? false : undefined;
     return this.trucksService.findAll(filter);
@@ -54,66 +51,135 @@ export class TrucksController {
 
   @Get(':id/history')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Get full history for a truck (assignments + repair logs)' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 200, description: 'Returns { assignments, repairs }' })
   getHistory(@Param('id') id: string) {
     return this.trucksService.getHistory(id);
+  }
+
+  @Get(':id/inspections')
+  @UseGuards(JwtAuthGuard)
+  listInspections(@Param('id') id: string) {
+    return this.trucksService.listInspections(id);
+  }
+
+  @Post(':id/inspections')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  createInspection(@Param('id') id: string, @Body() dto: CreateInspectionDto, @Request() req: any) {
+    return this.trucksService.createInspection(id, dto, req.user?.id);
   }
 
   @Post(':id/repair-logs')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Add a repair log entry for a truck (admin/dispatcher only)' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 201, description: 'Repair log created' })
-  createRepairLog(
-    @Param('id') id: string,
-    @Body() dto: CreateRepairLogDto,
-    @Request() req: any,
-  ) {
+  createRepairLog(@Param('id') id: string, @Body() dto: CreateRepairLogDto, @Request() req: any) {
     return this.trucksService.createRepairLog(id, dto, req.user?.id);
   }
 
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  @ApiOperation({ summary: 'Update truck status (available | unavailable | in_repair)' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 200, description: 'Truck status updated' })
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateTruckStatusDto,
-    @Request() req: any,
-  ) {
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateTruckStatusDto, @Request() req: any) {
     return this.trucksService.updateStatus(id, dto, req.user?.id);
   }
 
+  @Patch(':id/responsible')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  setResponsible(@Param('id') id: string, @Body() dto: SetResponsibleDto) {
+    return this.trucksService.setResponsible(id, dto.employeeId ?? null);
+  }
+
   @Get(':id')
-  @ApiOperation({ summary: 'Get truck by ID' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 200, description: 'Returns the truck' })
-  @ApiResponse({ status: 404, description: 'Truck not found' })
   findOne(@Param('id') id: string) {
     return this.trucksService.findOne(id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update truck' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 200, description: 'Truck updated successfully' })
-  @ApiResponse({ status: 404, description: 'Truck not found' })
-  @ApiResponse({ status: 409, description: 'Truck with this immatriculation already exists' })
   update(@Param('id') id: string, @Body() updateTruckDto: UpdateTruckDto) {
     return this.trucksService.update(id, updateTruckDto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete truck' })
-  @ApiParam({ name: 'id', description: 'Truck UUID' })
-  @ApiResponse({ status: 200, description: 'Truck deleted successfully' })
-  @ApiResponse({ status: 404, description: 'Truck not found' })
   remove(@Param('id') id: string) {
     return this.trucksService.remove(id);
+  }
+}
+
+// ── Inspections controller (separate prefix) ──────────────────────────────────
+
+@ApiTags('inspections')
+@ApiBearerAuth()
+@Controller('inspections')
+export class InspectionsController {
+  private readonly logger = new Logger(InspectionsController.name);
+  constructor(private readonly trucksService: TrucksService) {}
+
+  @Get('pending')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  listPending() {
+    return this.trucksService.listPendingInspections();
+  }
+
+  @Post(':id/submit')
+  @UseGuards(JwtAuthGuard)
+  submit(@Param('id') id: string, @Body() dto: SubmitInspectionDto, @Request() req: any) {
+    return this.trucksService.submitInspection(id, dto, req.user.id);
+  }
+
+  @Post(':id/photos')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FilesInterceptor('photos', 5, {
+      storage: diskStorage({
+        destination: (req, _file, cb) => {
+          const dir = join(process.cwd(), 'uploads', 'inspections', req.params.id);
+          mkdirSync(dir, { recursive: true });
+          cb(null, dir);
+        },
+        filename: (_req, file, cb) => {
+          cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${extname(file.originalname)}`);
+        },
+      }),
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/jpg', 'image/png'];
+        if (allowed.includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(
+            new Error(
+              `Type de fichier non accepté : ${file.mimetype}. Seuls JPEG et PNG sont autorisés.`,
+            ),
+            false,
+          );
+        }
+      },
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadPhotos(
+    @Param('id') id: string,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Request() req: any,
+  ) {
+    const fileList = (files ?? [])
+      .map((f) => `${f.originalname}→${f.filename}(${f.size}b)`)
+      .join(', ');
+    this.logger.log(
+      `Photo upload for inspection ${id}: ${files?.length ?? 0} file(s) from user ${req.user?.id} [${fileList}]`,
+    );
+    try {
+      return await this.trucksService.uploadInspectionPhotos(id, files ?? [], req.user?.id);
+    } catch (err) {
+      this.logger.error(`Photo upload failed for inspection ${id}:`, err);
+      throw err;
+    }
+  }
+
+  @Post(':id/acknowledge')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  acknowledge(@Param('id') id: string, @Request() req: any) {
+    return this.trucksService.acknowledgeInspection(id, req.user?.id);
   }
 }

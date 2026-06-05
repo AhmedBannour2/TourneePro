@@ -8,12 +8,12 @@ import { CreateEmployeeAccountDto } from './dto/create-account.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { TourType } from '@prisma/client';
-import {
-  SYSTEM_PAY_DEFAULTS,
-} from '../worked-days/worked-days.service';
+import { SYSTEM_PAY_DEFAULTS } from '../worked-days/worked-days.service';
 
-// Shared include for user email in employee responses
-const WITH_USER = { user: { select: { email: true } } } as const;
+const WITH_USER = {
+  user: { select: { email: true } },
+  responsibleTruck: { select: { id: true, immatriculation: true } },
+} as const;
 
 @Injectable()
 export class EmployeesService {
@@ -125,7 +125,7 @@ export class EmployeesService {
   async updateMyProfile(userId: string, dto: UpdateProfileDto) {
     const employee = await this.getMyProfile(userId);
     const firstName = dto.firstName ?? employee.firstName ?? undefined;
-    const lastName  = dto.lastName  ?? employee.lastName  ?? undefined;
+    const lastName = dto.lastName ?? employee.lastName ?? undefined;
     const name =
       firstName !== undefined && lastName !== undefined
         ? `${firstName} ${lastName}`.trim()
@@ -136,9 +136,9 @@ export class EmployeesService {
       data: {
         name,
         ...(dto.firstName !== undefined && { firstName: dto.firstName }),
-        ...(dto.lastName  !== undefined && { lastName:  dto.lastName  }),
-        ...(dto.phone     !== undefined && { phone:     dto.phone     }),
-        ...(dto.address   !== undefined && { address:   dto.address   }),
+        ...(dto.lastName !== undefined && { lastName: dto.lastName }),
+        ...(dto.phone !== undefined && { phone: dto.phone }),
+        ...(dto.address !== undefined && { address: dto.address }),
       },
       include: WITH_USER,
     });
@@ -186,7 +186,11 @@ export class EmployeesService {
 
   async deleteDocument(employeeId: string, docId: string) {
     const doc = await this.findDocument(employeeId, docId);
-    try { unlinkSync(doc.filePath); } catch { /* file already gone */ }
+    try {
+      unlinkSync(doc.filePath);
+    } catch {
+      /* file already gone */
+    }
     return this.prisma.employeeDocument.delete({ where: { id: docId } });
   }
 
@@ -244,7 +248,9 @@ export class EmployeesService {
           quai: tour.quai,
           horaire: tour.horaire,
           myRole: isChauffeur ? 'chauffeur' : 'aide',
-          partner: partner ? { id: partner.id, name: partner.name, phone: partner.phone ?? null } : null,
+          partner: partner
+            ? { id: partner.id, name: partner.name, phone: partner.phone ?? null }
+            : null,
           truck: assignment?.truck ? { immatriculation: assignment.truck.immatriculation } : null,
         };
       });
@@ -256,19 +262,27 @@ export class EmployeesService {
 
   async getPayRates(employeeId: string) {
     await this.findOne(employeeId);
-    const custom = await this.prisma.employeePayRate.findMany({ where: { employeeId } });
+    const [custom, globalRates] = await Promise.all([
+      this.prisma.employeePayRate.findMany({ where: { employeeId } }),
+      this.prisma.globalPayRate.findMany(),
+    ]);
     const customMap = new Map(custom.map((r) => [r.tourType, r]));
+    const globalMap = new Map(globalRates.map((r) => [r.tourType, r]));
 
-    return Object.entries(SYSTEM_PAY_DEFAULTS).map(([tourType, defaults]) => {
+    return Object.entries(SYSTEM_PAY_DEFAULTS).map(([tourType, sysDefaults]) => {
       const c = customMap.get(tourType as TourType);
+      const g = globalMap.get(tourType as TourType);
+      const globalChauffeur = g?.chauffeurRate ?? sysDefaults.chauffeurRate;
+      const globalAide = g !== undefined ? g.aideRate : sysDefaults.aideRate;
+      const effectiveAide = c !== undefined ? c.aideRate : globalAide;
       return {
         tourType: tourType as TourType,
-        chauffeurRate: c?.chauffeurRate ?? defaults.chauffeurRate,
-        aideRate: c?.aideRate !== undefined ? c.aideRate : defaults.aideRate,
-        isCustomChauffeur: c !== undefined && c.chauffeurRate !== defaults.chauffeurRate,
-        isCustomAide: c !== undefined && (c.aideRate ?? null) !== defaults.aideRate,
-        systemChauffeurRate: defaults.chauffeurRate,
-        systemAideRate: defaults.aideRate,
+        chauffeurRate: c?.chauffeurRate ?? globalChauffeur,
+        aideRate: effectiveAide,
+        isCustomChauffeur: c !== undefined,
+        isCustomAide: c !== undefined && c.aideRate !== null,
+        systemChauffeurRate: globalChauffeur,
+        systemAideRate: globalAide,
       };
     });
   }
@@ -358,7 +372,9 @@ export class EmployeesService {
           quai: tour.quai,
           horaire: tour.horaire,
           myRole: isChauffeur ? 'chauffeur' : 'aide',
-          partner: partner ? { id: partner.id, name: partner.name, phone: partner.phone ?? null } : null,
+          partner: partner
+            ? { id: partner.id, name: partner.name, phone: partner.phone ?? null }
+            : null,
           truck: assignment?.truck ? { immatriculation: assignment.truck.immatriculation } : null,
           confirmationStatus: tour.confirmationStatus,
           confirmation: tour.confirmation ?? null,
@@ -366,5 +382,53 @@ export class EmployeesService {
       });
 
     return { upcoming: shape(upcomingRaw), history: shape(historyRaw) };
+  }
+
+  async getMyExpress(userId: string) {
+    const employee = await this.prisma.employee.findUnique({ where: { userId } });
+    if (!employee) throw new NotFoundException('No employee profile is linked to this account');
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const assignments = await this.prisma.expressAssignment.findMany({
+      where: {
+        employeeId: employee.id,
+        expressDelivery: {
+          date: { gte: thirtyDaysAgo },
+          status: { not: 'CANCELLED' as any },
+        },
+      },
+      include: {
+        expressDelivery: {
+          include: {
+            assignments: {
+              include: {
+                employee: { select: { id: true, name: true, phone: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { expressDelivery: { date: 'asc' } },
+    });
+
+    return assignments.map((a) => {
+      const delivery = a.expressDelivery;
+      const partner = delivery.assignments.find((x) => x.employeeId !== employee.id);
+      return {
+        id: delivery.id,
+        type: delivery.type,
+        date: delivery.date,
+        status: delivery.status,
+        photo: delivery.photo,
+        notes: delivery.notes,
+        pay: a.pay,
+        confirmedAt: a.confirmedAt,
+        partner: partner ? partner.employee : null,
+      };
+    });
   }
 }

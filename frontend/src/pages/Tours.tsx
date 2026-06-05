@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
-  ChevronDown, ChevronUp, Plus, Loader2,
+  ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -193,9 +193,174 @@ function CreateTourModal({ open, platforms, onClose, onCreated }: {
   );
 }
 
+// ─── Admin confirm modal ─────────────────────────────────────────────────────
+
+interface ConfirmFields {
+  totalClients: string; delivered: string; absent: string; nonConform: string; notes: string;
+}
+const EMPTY_CONF: ConfirmFields = { totalClients: '', delivered: '', absent: '', nonConform: '', notes: '' };
+
+function AdminConfirmModal({ tour, onClose, onSaved }: {
+  tour: Tour; onClose: () => void; onSaved: () => void;
+}) {
+  const isEdit = tour.confirmationStatus === 'CONFIRMED';
+  const existing = tour.confirmation;
+  const [f, setF] = useState<ConfirmFields>(
+    isEdit && existing
+      ? { totalClients: String(existing.totalClients), delivered: String(existing.delivered),
+          absent: String(existing.absent), nonConform: String(existing.nonConform), notes: existing.notes ?? '' }
+      : EMPTY_CONF,
+  );
+  const { error: toastError, toasts, removeToast } = useToast();
+
+  const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
+  const total = n(f.totalClients);
+  const sum   = n(f.delivered) + n(f.absent) + n(f.nonConform);
+  const valid = total > 0 && sum <= total;
+
+  const mut = useMutation({
+    mutationFn: (body: object) =>
+      isEdit
+        ? api.patch(`/tours/${tour.id}/confirm-admin`, body)
+        : api.post(`/tours/${tour.id}/confirm-admin`, body),
+    onSuccess: () => { onSaved(); onClose(); },
+    onError: (e: any) => toastError(e.response?.data?.message || 'Erreur'),
+  });
+
+  const set = (k: keyof ConfirmFields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setF(prev => ({ ...prev, [k]: e.target.value }));
+
+  const dateStr = new Date(tour.date).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardCheck size={18} className="text-blue-600" />
+              {isEdit ? 'Modifier' : 'Confirmer'} — {tour.tourCode}
+            </DialogTitle>
+            <p className="text-sm text-gray-500">{dateStr}</p>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            <div>
+              <Label>Total clients <span className="text-red-500">*</span></Label>
+              <Input type="number" min="0" value={f.totalClients} onChange={set('totalClients')} placeholder="0" className="mt-1" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-green-700">Livrés *</Label>
+                <Input type="number" min="0" value={f.delivered} onChange={set('delivered')} placeholder="0" className="mt-1 border-green-200" />
+              </div>
+              <div>
+                <Label className="text-orange-700">Absents *</Label>
+                <Input type="number" min="0" value={f.absent} onChange={set('absent')} placeholder="0" className="mt-1 border-orange-200" />
+              </div>
+              <div>
+                <Label className="text-red-700">Non-conf. *</Label>
+                <Input type="number" min="0" value={f.nonConform} onChange={set('nonConform')} placeholder="0" className="mt-1 border-red-200" />
+              </div>
+            </div>
+            {total > 0 && (
+              <div className={`text-sm font-medium rounded-lg px-3 py-2 flex justify-between border ${sum <= total ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                <span>{n(f.delivered)} + {n(f.absent)} + {n(f.nonConform)} = {sum}</span>
+                <span>/ Total : {total}</span>
+              </div>
+            )}
+            <div>
+              <Label>Notes (optionnel)</Label>
+              <textarea value={f.notes} onChange={set('notes')} placeholder="Observations..."
+                rows={2} className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Annuler</Button>
+            <Button
+              onClick={() => mut.mutate({ totalClients: n(f.totalClients), delivered: n(f.delivered), absent: n(f.absent), nonConform: n(f.nonConform), notes: f.notes || undefined })}
+              disabled={!valid || mut.isPending}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {mut.isPending
+                ? <><Loader2 size={14} className="mr-1 animate-spin" /> Enregistrement…</>
+                : isEdit ? 'Mettre à jour' : 'Confirmer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Delete confirmation dialog ──────────────────────────────────────────────
+
+function DeleteTourDialog({ tour, onClose, onDeleted }: {
+  tour: Tour; onClose: () => void; onDeleted: () => void;
+}) {
+  const isAssigned = ['assigned', 'notified', 'completed'].includes(tour.status);
+  const { error: toastError, toasts, removeToast } = useToast();
+
+  const dateStr = new Date(tour.date).toLocaleDateString('fr-FR', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  const mut = useMutation({
+    mutationFn: () => api.delete(`/tours/${tour.id}`),
+    onSuccess: () => { onDeleted(); onClose(); },
+    onError: (e: any) => toastError(e.response?.data?.message || 'Erreur lors de la suppression'),
+  });
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 size={18} /> Supprimer la tournée
+            </DialogTitle>
+          </DialogHeader>
+          {isAssigned ? (
+            <div className="py-2 space-y-2">
+              <p className="text-sm text-gray-700">
+                Cette tournée est <strong>assignée</strong>. Désassignez-la d'abord avant de la supprimer.
+              </p>
+            </div>
+          ) : (
+            <div className="py-2 space-y-2">
+              <p className="text-sm text-gray-700">
+                Supprimer la tournée <strong className="font-mono">{tour.tourCode}</strong> du <strong>{dateStr}</strong> ?
+              </p>
+              <p className="text-xs text-red-600">Cette action est irréversible.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              {isAssigned ? 'OK' : 'Annuler'}
+            </Button>
+            {!isAssigned && (
+              <Button
+                onClick={() => mut.mutate()}
+                disabled={mut.isPending}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {mut.isPending ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Trash2 size={14} className="mr-1" />}
+                Supprimer
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ─── Tour row ────────────────────────────────────────────────────────────────
 
-function TourRow({ tour, onView, dimmed }: { tour: Tour; onView: () => void; dimmed?: boolean }) {
+function TourRow({ tour, onView, onDelete, dimmed }: { tour: Tour; onView: () => void; onDelete: () => void; dimmed?: boolean }) {
   const asgn = tour.assignments?.[0];
   const st   = statusMap[tour.status];
   const confirmed = tour.confirmationStatus === 'CONFIRMED';
@@ -257,18 +422,82 @@ function TourRow({ tour, onView, dimmed }: { tour: Tour; onView: () => void; dim
         </div>
       </td>
       <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-        <button onClick={onView} className="text-xs border rounded px-2 py-1 text-gray-500 hover:bg-gray-50">
-          Voir
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={onView} className="text-xs border rounded px-2 py-1 text-gray-500 hover:bg-gray-50">
+            Voir
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            title="Supprimer"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </td>
     </tr>
   );
 }
 
+// ─── Tour card (mobile) ───────────────────────────────────────────────────────
+
+function TourCard({ tour, onView, onDelete }: { tour: Tour; onView: () => void; onDelete: () => void }) {
+  const asgn      = tour.assignments?.[0];
+  const st        = statusMap[tour.status];
+  const confirmed = tour.confirmationStatus === 'CONFIRMED';
+  const tb        = typeBadge(tour.tourType);
+
+  return (
+    <div
+      onClick={onView}
+      className={`rounded-lg border p-3 shadow-sm cursor-pointer active:opacity-90 transition-opacity
+        ${confirmed ? 'border-green-200 bg-green-50/30' : 'border-gray-200 bg-white'}`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+          <span className="font-mono font-bold text-sm leading-snug">{tour.tourCode}</span>
+          {tour.source === 'MANUAL' && (
+            <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">Manuel</span>
+          )}
+          {tb && <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${tb.cls}`}>{tb.label}</span>}
+        </div>
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(); }}
+          className="p-1 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex-shrink-0 touch-compact h-7 w-7 flex items-center justify-center"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs text-gray-500 leading-snug mb-1.5">
+        {tour.platform?.name && <span className="font-medium text-gray-700">{tour.platform.name}</span>}
+        {tour.quai   && <span>Quai {tour.quai}</span>}
+        {tour.horaire && <span>{tour.horaire}</span>}
+      </div>
+
+      {asgn && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 leading-snug mb-1.5">
+          {asgn.chauffeur && <span>👤 <span className="truncate max-w-[100px] inline-block align-bottom">{asgn.chauffeur.name}</span></span>}
+          {asgn.aide      && <span>👤 <span className="truncate max-w-[100px] inline-block align-bottom">{asgn.aide.name}</span></span>}
+          {asgn.truck     && <span>🚛 {asgn.truck.immatriculation}</span>}
+        </div>
+      )}
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {st && <Badge className={`text-[10px] px-1.5 py-0.5 h-5 ${st.cls}`}>{st.label}</Badge>}
+        {confirmed
+          ? <span className="flex items-center gap-0.5 text-green-700 text-[10px] font-medium"><CheckCircle2 size={10} /> Confirmé</span>
+          : <span className="text-[10px] text-gray-400">Non confirmé</span>}
+      </div>
+    </div>
+  );
+}
+
 // ─── Date group ───────────────────────────────────────────────────────────────
 
-function DateGroup({ dateKey, tours, defaultExpanded, onView }: {
-  dateKey: string; tours: Tour[]; defaultExpanded: boolean; onView: (t: Tour) => void;
+function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
+  dateKey: string; tours: Tour[]; defaultExpanded: boolean;
+  onView: (t: Tour) => void; onDelete: (t: Tour) => void;
 }) {
   const [open, setOpen] = useState(defaultExpanded);
 
@@ -290,15 +519,14 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView }: {
         className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors
           ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-50 hover:bg-gray-100'}`}
       >
-        <div className="flex items-center gap-3">
-          <span className={`font-semibold capitalize ${isToday ? 'text-white' : 'text-gray-800'}`}>{label}</span>
-          {isToday && <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full font-medium">Aujourd'hui</span>}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`font-semibold capitalize truncate ${isToday ? 'text-white' : 'text-gray-800'}`}>{label}</span>
+          {isToday && <span className="hidden sm:inline text-xs bg-white/20 px-2 py-0.5 rounded-full font-medium flex-shrink-0">Aujourd'hui</span>}
         </div>
-        <div className="flex items-center gap-4">
-          <div className={`flex items-center gap-3 text-sm ${isToday ? 'text-blue-100' : 'text-gray-500'}`}>
-            <span>{tours.length} tournée{tours.length > 1 ? 's' : ''}</span>
-            {assigned > 0 && <span className={isToday ? 'text-blue-100' : 'text-blue-600'}>{assigned} assignée{assigned > 1 ? 's' : ''}</span>}
-            {confirmed > 0 && <span className={isToday ? 'text-blue-100' : 'text-green-600'}>{confirmed} confirmée{confirmed > 1 ? 's' : ''}</span>}
+        <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
+          <div className={`flex items-center gap-1.5 md:gap-3 text-xs md:text-sm ${isToday ? 'text-blue-100' : 'text-gray-500'}`}>
+            <span className="font-medium">{tours.length}</span>
+            {assigned > 0 && <span className={isToday ? 'text-blue-100' : 'text-blue-600 font-medium'}>{assigned}✓</span>}
           </div>
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </div>
@@ -306,22 +534,32 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView }: {
 
       {/* Rows */}
       {open && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-white border-b">
-              <tr className="text-xs text-gray-500">
-                {['Code','Type','Plateforme','Quai','Heure','Statut','Confirmation','Chauffeur','Aide','Camion','Vu',''].map(h => (
-                  <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+        <>
+          {/* Desktop: table */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white border-b">
+                <tr className="text-xs text-gray-500">
+                  {['Code','Type','Plateforme','Quai','Heure','Statut','Confirmation','Chauffeur','Aide','Camion','Vu',''].map(h => (
+                    <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tours.map(t => (
+                  <TourRow key={t.id} tour={t} onView={() => onView(t)} onDelete={() => onDelete(t)} />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tours.map(t => (
-                <TourRow key={t.id} tour={t} onView={() => onView(t)} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile: cards */}
+          <div className="block md:hidden p-3 space-y-2">
+            {tours.map(t => (
+              <TourCard key={t.id} tour={t} onView={() => onView(t)} onDelete={() => onDelete(t)} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -329,15 +567,18 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView }: {
 
 // ─── Detail panel ─────────────────────────────────────────────────────────────
 
-function DetailPanel({ tour, onClose }: { tour: Tour; onClose: () => void }) {
+function DetailPanel({ tour, onClose, onDelete, onConfirm }: {
+  tour: Tour; onClose: () => void; onDelete: () => void; onConfirm: () => void;
+}) {
   const asgn = tour.assignments?.[0];
   const confirmed = tour.confirmationStatus === 'CONFIRMED';
   const tb = typeBadge(tour.tourType);
+  const isAssigned = !!asgn && (!!asgn.chauffeur || !!asgn.aide);
 
   return (
     <div className="fixed inset-0 z-40 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-96 bg-white h-full shadow-xl flex flex-col">
+      <div className="flex-1 bg-black/40 hidden md:block" onClick={onClose} />
+      <div className="w-full md:w-96 bg-white h-full shadow-xl flex flex-col overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-lg">Tournée {tour.tourCode}</h2>
@@ -422,6 +663,27 @@ function DetailPanel({ tour, onClose }: { tour: Tour; onClose: () => void }) {
             )}
           </div>
         </div>
+        <div className="px-5 py-4 border-t space-y-2">
+          {isAssigned && (
+            <button
+              onClick={onConfirm}
+              className={`w-full flex items-center justify-center gap-2 text-sm rounded-lg py-2 transition-colors border ${
+                confirmed
+                  ? 'border-green-200 text-green-700 hover:bg-green-50'
+                  : 'border-blue-200 text-blue-700 hover:bg-blue-50'
+              }`}
+            >
+              <ClipboardCheck size={14} />
+              {confirmed ? 'Modifier la confirmation' : 'Confirmer la tournée'}
+            </button>
+          )}
+          <button
+            onClick={onDelete}
+            className="w-full flex items-center justify-center gap-2 text-sm text-red-600 border border-red-200 rounded-lg py-2 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 size={14} /> Supprimer la tournée
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -470,7 +732,7 @@ const MONTH_NAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet',
 
 export default function Tours() {
   const queryClient = useQueryClient();
-  const { toasts, removeToast } = useToast();
+  const { success: showSuccess, toasts, removeToast } = useToast();
 
   // Tabs
   const [tab, setTab] = useState<TabType>('active');
@@ -486,9 +748,29 @@ export default function Tours() {
   const [histMonth, setHistMonth] = useState(now.getMonth() + 1);
   const [histYear, setHistYear]   = useState(now.getFullYear());
 
-  // Detail + create
-  const [detail, setDetail]         = useState<Tour | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  // Detail + create + delete + confirm
+  const [detail, setDetail]             = useState<Tour | null>(null);
+  const [createOpen, setCreateOpen]     = useState(false);
+  const [deletingTour, setDeletingTour] = useState<Tour | null>(null);
+  const [confirmingTour, setConfirmingTour] = useState<Tour | null>(null);
+
+  const handleDeleteDone = () => {
+    setDeletingTour(null);
+    setDetail(null);
+    showSuccess('Tournée supprimée');
+    queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+    queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+  };
+
+  const handleConfirmDone = () => {
+    setConfirmingTour(null);
+    showSuccess('Confirmation enregistrée');
+    queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+    queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+    if (detail) {
+      api.get<Tour>(`/tours/${detail.id}`).then(r => setDetail(r.data)).catch(() => {});
+    }
+  };
 
   // Platforms
   const { data: platforms } = useQuery<Platform[]>({
@@ -566,15 +848,15 @@ export default function Tours() {
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Tours</h1>
-        <Button onClick={() => setCreateOpen(true)} className="flex items-center gap-2">
-          <Plus size={16} /> Nouvelle tournée
+        <h1 className="text-xl md:text-2xl font-bold">Tournées</h1>
+        <Button onClick={() => setCreateOpen(true)} size="sm" className="flex items-center gap-1.5 h-9 md:h-10">
+          <Plus size={15} /> <span className="hidden sm:inline">Nouvelle</span> tournée
         </Button>
       </div>
 
       {/* ── Filter bar ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border p-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Plateforme</label>
             <select className={FILTER_SEL} value={platform} onChange={e => setPlatform(e.target.value)}>
@@ -652,13 +934,39 @@ export default function Tours() {
               tours={dateTours}
               defaultExpanded={tab === 'active' && (dateKey === todayStr || dateKey === tomorrowStr)}
               onView={setDetail}
+              onDelete={setDeletingTour}
             />
           ))}
         </div>
       )}
 
       {/* ── Detail panel ───────────────────────────────────────────────── */}
-      {detail && <DetailPanel tour={detail} onClose={() => setDetail(null)} />}
+      {detail && (
+        <DetailPanel
+          tour={detail}
+          onClose={() => setDetail(null)}
+          onDelete={() => setDeletingTour(detail)}
+          onConfirm={() => setConfirmingTour(detail)}
+        />
+      )}
+
+      {/* ── Admin confirm modal ─────────────────────────────────────────── */}
+      {confirmingTour && (
+        <AdminConfirmModal
+          tour={confirmingTour}
+          onClose={() => setConfirmingTour(null)}
+          onSaved={handleConfirmDone}
+        />
+      )}
+
+      {/* ── Delete confirmation ─────────────────────────────────────────── */}
+      {deletingTour && (
+        <DeleteTourDialog
+          tour={deletingTour}
+          onClose={() => setDeletingTour(null)}
+          onDeleted={handleDeleteDone}
+        />
+      )}
 
       {/* ── Create modal ───────────────────────────────────────────────── */}
       <CreateTourModal

@@ -36,6 +36,7 @@ interface Employee {
   createdAt: string;
   userId: string | null;
   user: { email: string } | null;
+  responsibleTruck: { id: string; immatriculation: string } | null;
 }
 
 interface EmployeeDocument {
@@ -365,9 +366,9 @@ export default function Employees() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Employés</h1>
-        <Button onClick={openCreate}>
-          <UserPlus className="w-4 h-4 mr-2" /> Ajouter
+        <h1 className="text-xl md:text-2xl font-bold">Employés</h1>
+        <Button onClick={openCreate} size="sm" className="h-9">
+          <UserPlus className="w-4 h-4 mr-1.5" /> Ajouter
         </Button>
       </div>
 
@@ -403,8 +404,8 @@ export default function Employees() {
         </div>
       </Card>
 
-      {/* Main table */}
-      <div className="bg-white border rounded-lg">
+      {/* ── Desktop table ───────────────────────────────────────────────────────── */}
+      <div className="hidden md:block bg-white border rounded-lg">
         {isLoading ? (
           <div className="p-6 space-y-3">
             {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
@@ -425,70 +426,77 @@ export default function Employees() {
             </thead>
             <tbody>
               {filtered.map((emp) => (
-                <tr
-                  key={emp.id}
-                  className="border-t hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setPanelEmployee(emp)}
-                >
+                <tr key={emp.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setPanelEmployee(emp)}>
                   <td className="px-4 py-3 font-medium">{emp.name}</td>
-                  <td className="px-4 py-3">
-                    <Badge className={ROLE_COLORS[emp.role] ?? 'bg-gray-100 text-gray-700'}>
-                      {emp.role}
-                    </Badge>
-                  </td>
+                  <td className="px-4 py-3"><Badge className={ROLE_COLORS[emp.role] ?? 'bg-gray-100 text-gray-700'}>{emp.role}</Badge></td>
                   <td className="px-4 py-3 text-gray-600">
-                    {emp.phone ? (
-                      <div className="flex items-center gap-1">
-                        <Phone className="w-3 h-3" />{emp.phone}
-                      </div>
-                    ) : <span className="text-gray-400">—</span>}
+                    {emp.phone ? <div className="flex items-center gap-1"><Phone className="w-3 h-3" />{emp.phone}</div> : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    <Badge className={emp.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}>
-                      {emp.isActive ? 'Actif' : 'Inactif'}
-                    </Badge>
-                  </td>
+                  <td className="px-4 py-3"><Badge className={emp.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}>{emp.isActive ? 'Actif' : 'Inactif'}</Badge></td>
                   <td className="px-4 py-3 text-sm">
-                    {emp.user?.email ? (
-                      <span className="flex items-center gap-1 text-indigo-700">
-                        <ShieldCheck className="w-3.5 h-3.5" /> {emp.user.email}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">Pas de compte</span>
-                    )}
+                    {emp.user?.email ? <span className="flex items-center gap-1 text-indigo-700"><ShieldCheck className="w-3.5 h-3.5" />{emp.user.email}</span> : <span className="text-gray-400">Pas de compte</span>}
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
-                      {/* Toggle active */}
-                      <Button
-                        variant="ghost" size="sm"
-                        title={emp.isActive ? 'Désactiver' : 'Activer'}
-                        onClick={() => toggleMutation.mutate({ id: emp.id, isActive: !emp.isActive })}
-                      >
-                        {emp.isActive
-                          ? <UserX className="w-4 h-4 text-red-500" />
-                          : <UserCheck className="w-4 h-4 text-green-600" />}
+                      <Button variant="ghost" size="sm" title={emp.isActive ? 'Désactiver' : 'Activer'} onClick={() => toggleMutation.mutate({ id: emp.id, isActive: !emp.isActive })}>
+                        {emp.isActive ? <UserX className="w-4 h-4 text-red-500" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                       </Button>
-                      {/* Edit */}
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(emp)}>
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      {/* Create account */}
-                      {emp.userId ? (
-                        <span className="p-1.5" title="Compte existant">
-                          <ShieldCheck className="w-4 h-4 text-green-500" />
-                        </span>
-                      ) : (
-                        <Button variant="ghost" size="sm" title="Créer un compte" onClick={() => openAccountDialog(emp)}>
-                          <KeyRound className="w-4 h-4 text-indigo-600" />
-                        </Button>
-                      )}
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(emp)}><Pencil className="w-4 h-4" /></Button>
+                      {emp.userId ? <span className="p-1.5"><ShieldCheck className="w-4 h-4 text-green-500" /></span>
+                        : <Button variant="ghost" size="sm" onClick={() => openAccountDialog(emp)}><KeyRound className="w-4 h-4 text-indigo-600" /></Button>}
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      {/* ── Mobile cards ────────────────────────────────────────────────────────── */}
+      <div className="block md:hidden space-y-3">
+        {isLoading ? (
+          [...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)
+        ) : filtered.length === 0 ? (
+          <div className="py-12 text-center text-gray-400">
+            <User className="h-10 w-10 mx-auto mb-2 opacity-30" />
+            <p>Aucun employé trouvé</p>
+          </div>
+        ) : (
+          filtered.map((emp) => (
+            <div
+              key={emp.id}
+              onClick={() => setPanelEmployee(emp)}
+              className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer active:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                    <span className="text-sm font-semibold truncate">{emp.name}</span>
+                    <Badge className={`text-[10px] h-5 px-1.5 flex-shrink-0 ${ROLE_COLORS[emp.role] ?? 'bg-gray-100 text-gray-700'}`}>{emp.role}</Badge>
+                    <Badge className={`text-[10px] h-5 px-1.5 flex-shrink-0 ${emp.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>{emp.isActive ? 'Actif' : 'Inactif'}</Badge>
+                  </div>
+                  {emp.phone && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 leading-snug">
+                      <Phone className="w-3 h-3 flex-shrink-0" /><span className="truncate">{emp.phone}</span>
+                    </div>
+                  )}
+                  {emp.responsibleTruck && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <TruckIcon className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                      <span className="font-mono text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{emp.responsibleTruck.immatriculation}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1 flex-shrink-0 touch-compact" onClick={(e) => e.stopPropagation()}>
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => openEdit(emp)}><Pencil className="w-4 h-4" /></Button>
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => toggleMutation.mutate({ id: emp.id, isActive: !emp.isActive })}>
+                    {emp.isActive ? <UserX className="w-4 h-4 text-red-500" /> : <UserCheck className="w-4 h-4 text-green-600" />}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
         )}
       </div>
 
@@ -628,6 +636,21 @@ export default function Employees() {
                         <MapPin className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />{panelEmployee.address}
                       </div>
                     ) : <p className="text-sm text-gray-400">Pas d'adresse renseignée</p>}
+                  </div>
+
+                  {/* Camion assigné */}
+                  <div className="border-t pt-4 space-y-2">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Camion assigné</h3>
+                    {panelEmployee.responsibleTruck ? (
+                      <div className="flex items-center gap-2">
+                        <TruckIcon className="w-4 h-4 text-blue-500" />
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-semibold bg-blue-100 text-blue-800">
+                          {panelEmployee.responsibleTruck.immatriculation}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">Aucun camion assigné</p>
+                    )}
                   </div>
 
                   {/* Account */}
@@ -807,16 +830,7 @@ export default function Employees() {
 
                             return (
                               <tr key={r.tourType} className="group">
-                                <td className="py-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium">{TOUR_TYPE_LABELS[r.tourType]}</span>
-                                    {(r.isCustomChauffeur || r.isCustomAide) && (
-                                      <Badge className="text-xs bg-orange-100 text-orange-700 border border-orange-200">
-                                        Perso
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </td>
+                                <td className="py-2 font-medium">{TOUR_TYPE_LABELS[r.tourType]}</td>
                                 <td className="py-2 text-center">
                                   {isEditing ? (
                                     <input
@@ -845,11 +859,11 @@ export default function Employees() {
                                       }
                                       className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group"
                                     >
-                                      <span className={r.isCustomChauffeur ? 'font-semibold' : 'text-gray-500'}>
-                                        {r.chauffeurRate}€
-                                      </span>
-                                      {!r.isCustomChauffeur && (
-                                        <span className="text-xs text-gray-300">(défaut)</span>
+                                      <span>{r.chauffeurRate}€</span>
+                                      {r.isCustomChauffeur ? (
+                                        <span className="text-xs text-blue-500">(personnalisé)</span>
+                                      ) : (
+                                        <span className="text-xs text-gray-400">(défaut)</span>
                                       )}
                                       <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
                                     </button>
@@ -885,11 +899,13 @@ export default function Employees() {
                                       }
                                       className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group"
                                     >
-                                      <span className={r.isCustomAide ? 'font-semibold' : 'text-gray-500'}>
+                                      <span>
                                         {r.aideRate != null ? `${r.aideRate}€` : `${r.systemAideRate}€`}
                                       </span>
-                                      {!r.isCustomAide && (
-                                        <span className="text-xs text-gray-300">(défaut)</span>
+                                      {r.isCustomAide ? (
+                                        <span className="text-xs text-blue-500">(personnalisé)</span>
+                                      ) : (
+                                        <span className="text-xs text-gray-400">(défaut)</span>
                                       )}
                                       <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
                                     </button>

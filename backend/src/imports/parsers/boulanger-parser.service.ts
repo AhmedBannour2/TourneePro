@@ -9,8 +9,14 @@ export interface ParsedTourRow {
   tourType: 'Standard' | 'GV' | 'Mono' | 'Install' | 'Spéciale' | 'Après-midi' | 'SAV' | 'Unknown';
   /** Platform code: F166 or GARONOR */
   platform: 'F166' | 'GARONOR';
-  /** Pickup date */
+  /** Pickup date as JS Date (kept for backward compat) */
   date: Date;
+  /**
+   * Canonical YYYY-MM-DD string built from local integer parts inside the parser.
+   * Always use this for storage — never re-derive from .date via toISOString() or getDate(),
+   * because timezone offsets can shift the day depending on the runtime environment.
+   */
+  dateStr: string;
   /** Pickup time e.g. "7:00", "8:30" */
   horaire: string | null;
   /** Dock number / quai */
@@ -58,10 +64,11 @@ export class BoulangerParserService {
     this.logger.log(`Sheets found: ${sheetNames.join(', ')}`);
 
     // ── Alfortville / F166 — detected by sheet name ─────────────────────────
-    const alfortSheet = workbook.worksheets.find((ws) =>
-      ws.name.toLowerCase().includes('alfortville') ||
-      ws.name.toLowerCase().includes('mise à quai alfortville') ||
-      ws.name.toLowerCase().includes('f166'),
+    const alfortSheet = workbook.worksheets.find(
+      (ws) =>
+        ws.name.toLowerCase().includes('alfortville') ||
+        ws.name.toLowerCase().includes('mise à quai alfortville') ||
+        ws.name.toLowerCase().includes('f166'),
     );
 
     if (alfortSheet) {
@@ -122,6 +129,11 @@ export class BoulangerParserService {
       errors.push(`Row 1: Cannot parse date from cell B1: ${rawDate}`);
     }
 
+    // Build dateStr from local integer parts — never toISOString() to avoid UTC offset shift
+    const alfortDateStr = date
+      ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      : new Date().toISOString().split('T')[0]; // fallback only if B1 is unreadable
+
     // Row 2: get time slot labels
     const timeRow = ws.getRow(2);
     const blocks = [
@@ -159,6 +171,7 @@ export class BoulangerParserService {
           tourType: this.deriveTourType(tourNumber, String(societeRaw || '')),
           platform: 'F166',
           date: date || new Date(),
+          dateStr: alfortDateStr,
           horaire: block.horaire,
           quai: quaiRaw != null ? String(quaiRaw).trim() : null,
           nbColis: null,
@@ -174,9 +187,7 @@ export class BoulangerParserService {
     }
 
     const stpRows = allRows.filter((r) => this.isStp(r.prestataire));
-    this.logger.log(
-      `Alfortville: ${allRows.length} total rows, ${stpRows.length} STP rows`,
-    );
+    this.logger.log(`Alfortville: ${allRows.length} total rows, ${stpRows.length} STP rows`);
 
     return {
       platform: 'F166',
@@ -218,9 +229,9 @@ export class BoulangerParserService {
     const wb = XLSX.readFile(filePath, { cellFormula: false, cellDates: true });
 
     if (!wb.Sheets[sheetName]) {
-      const available = wb.SheetNames
-        .filter((n) => /^([1-9]|[12]\d|3[01])$/.test(n.trim()))
-        .join(', ');
+      const available = wb.SheetNames.filter((n) => /^([1-9]|[12]\d|3[01])$/.test(n.trim())).join(
+        ', ',
+      );
       throw new BadRequestException(
         `Sheet '${sheetName}' (tomorrow) not found in this Garonor file. ` +
           `Available day sheets: ${available || 'none'}.`,
@@ -233,44 +244,56 @@ export class BoulangerParserService {
       defval: null,
     });
 
-    // Row 2 (index 1), col B (index 1) = canonical date stored in the sheet
-    const rawSheetDate = grid[1]?.[1];
-    const sheetDate = (rawSheetDate instanceof Date ? rawSheetDate : this.parseDate(rawSheetDate)) ?? date;
+    // ── Date for this sheet ─────────────────────────────────────────────────
+    // The day number comes from the sheet name itself (the same value that was
+    // used to open this sheet), year and month from tomorrowDate()'s local parts.
+    // These integers are the ground truth — we never re-derive from a Date object
+    // via toISOString() / getUTCDate() because Node.js timezone handling can shift
+    // the calendar day depending on when/how the Date was constructed.
+    const sheetDay = parseInt(sheetName, 10); // e.g. 5
+    const sheetYear = date.getFullYear(); // local year from tomorrowDate
+    const sheetMon = date.getMonth() + 1; // local month (1-indexed)
+    const sheetDateStr = `${sheetYear}-${String(sheetMon).padStart(2, '0')}-${String(sheetDay).padStart(2, '0')}`;
+    const sheetDate = new Date(sheetYear, sheetMon - 1, sheetDay); // local midnight for backward compat
 
+    // Log what B2 actually contains (diagnostic only — not used for the date)
+    const rawB2 = grid[1]?.[1];
     this.logger.log(
-      `Garonor: sheet '${sheetName}' — ${grid.length} total rows in XML, ` +
-        `sheet date: ${sheetDate.toISOString().split('T')[0]}`,
+      `Garonor: sheet '${sheetName}' — ${grid.length} rows, ` +
+        `B2 raw=${JSON.stringify(rawB2)}, stored dateStr=${sheetDateStr}`,
     );
 
     const allRows: ParsedTourRow[] = [];
 
-    for (let i = 3; i < grid.length; i++) {   // i=3 → Excel row 4 (data start)
+    for (let i = 3; i < grid.length; i++) {
+      // i=3 → Excel row 4 (data start)
       const r = grid[i];
       if (!r) continue;
 
-      const tournee     = r[3]; // col D — skip if null/empty
+      const tournee = r[3]; // col D — skip if null/empty
       const prestataire = r[5]; // col F — skip if null/empty
       if (tournee == null || tournee === '') continue;
       if (prestataire == null || String(prestataire).trim() === '') continue;
       const tourNumber = this.parseTourNumber(tournee);
       if (tourNumber === null) continue;
 
-      const quantite    = r[0]; // A
-      const horaire     = r[1]; // B
+      const quantite = r[0]; // A
+      const horaire = r[1]; // B
       // Quai (col C) may be a number (e.g. 17) or a named string (e.g. 'RETOUR A', 'RETOUR B').
       // The Tour.quai field is String? — both forms are stored as strings.
-      const quai        = r[2]; // C
+      const quai = r[2]; // C
       const specificite = r[4]; // E
-      const equipage1   = r[6]; // G
-      const equipage2   = r[7]; // H
-      const telephone   = r[8]; // I
-      const immat       = r[9]; // J
+      const equipage1 = r[6]; // G
+      const equipage2 = r[7]; // H
+      const telephone = r[8]; // I
+      const immat = r[9]; // J
 
       allRows.push({
         tourNumber,
         tourType: this.deriveTourType(tourNumber, String(specificite ?? '')),
         platform: 'GARONOR',
         date: sheetDate,
+        dateStr: sheetDateStr,
         horaire: horaire != null ? this.normalizeTime(String(horaire)) : null,
         quai: quai != null ? String(quai).trim() : null,
         nbColis: quantite != null ? this.parseNumber(quantite) : null,
@@ -280,7 +303,7 @@ export class BoulangerParserService {
         equipage2: equipage2 != null ? String(equipage2).trim() : null,
         telephone: telephone != null ? this.cleanPhone(String(telephone)) : null,
         sourceSheet: sheetName,
-        sourceRow: i + 1, // Excel row number (1-indexed)
+        sourceRow: i + 1,
       });
     }
 
@@ -304,14 +327,13 @@ export class BoulangerParserService {
   // ─────────────────────────────────────────────
 
   /** Derive tour type from tour number range + Spécificité/Société text */
-  private deriveTourType(
-    tourNumber: number,
-    specificite: string,
-  ): ParsedTourRow['tourType'] {
+  private deriveTourType(tourNumber: number, specificite: string): ParsedTourRow['tourType'] {
     const spec = specificite.toUpperCase();
 
-    if (spec.includes('SPÉCIALE') || spec.includes('SPECIALE') || spec.includes('SPC')) return 'Spéciale';
-    if (spec.includes('APRÈS') || spec.includes('APRES') || spec.includes('MIDI')) return 'Après-midi';
+    if (spec.includes('SPÉCIALE') || spec.includes('SPECIALE') || spec.includes('SPC'))
+      return 'Spéciale';
+    if (spec.includes('APRÈS') || spec.includes('APRES') || spec.includes('MIDI'))
+      return 'Après-midi';
     if (spec.includes('SAV')) return 'SAV';
     if (spec.includes('INSTALL')) return 'Install';
     if (spec.includes('MONO')) return 'Mono';
@@ -355,6 +377,42 @@ export class BoulangerParserService {
     if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
     const d = new Date(raw as string);
     return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Reads a B2 cell value (JS Date, Excel serial number, or "DD/MM/YYYY" string)
+   * and returns a Date at LOCAL midnight using explicit year/month/day parts.
+   *
+   * Avoids toISOString() at every step so UTC-offset servers cannot shift the
+   * calendar day: new Date(y, m, d) always constructs local midnight.
+   */
+  private readCellDateLocal(raw: unknown): Date | null {
+    if (!raw) return null;
+
+    // Case 1: JS Date object (SheetJS cellDates:true)
+    if (raw instanceof Date) {
+      if (isNaN(raw.getTime())) return null;
+      // Reconstruct at local midnight using local parts to eliminate any UTC shift
+      return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+    }
+
+    // Case 2: French "DD/MM/YYYY" string
+    if (typeof raw === 'string') {
+      const fr = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (fr) return new Date(Number(fr[3]), Number(fr[2]) - 1, Number(fr[1]));
+      // ISO or other string
+      const iso = new Date(raw);
+      if (!isNaN(iso.getTime())) return new Date(iso.getFullYear(), iso.getMonth(), iso.getDate());
+    }
+
+    // Case 3: Excel serial number (days since 1899-12-30, UTC-based)
+    if (typeof raw === 'number' && raw > 59) {
+      const ms = Math.round((raw - 25569) * 86400000);
+      const d = new Date(ms);
+      if (!isNaN(d.getTime())) return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    }
+
+    return null;
   }
 
   private normalizeTime(raw: unknown): string | null {

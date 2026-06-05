@@ -207,7 +207,7 @@ export default function Import() {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={`
-              border-2 border-dashed rounded-lg p-12 text-center transition-colors
+              border-2 border-dashed rounded-lg p-6 md:p-12 text-center transition-colors
               ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}
               ${selectedFile ? 'bg-green-50 border-green-500' : ''}
             `}
@@ -342,17 +342,19 @@ export default function Import() {
 
               {/* Rows Table with Tabs */}
               <Tabs defaultValue="all">
-                <TabsList>
-                  <TabsTrigger value="all">
-                    All ({allRows.length})
+                <div className="overflow-x-auto">
+                <TabsList className="w-full md:w-auto">
+                  <TabsTrigger value="all" className="flex-1 md:flex-none">
+                    Tous ({allRows.length})
                   </TabsTrigger>
-                  <TabsTrigger value="parsed">
-                    Parsed ({parsedRows.length})
+                  <TabsTrigger value="parsed" className="flex-1 md:flex-none">
+                    Analysés ({parsedRows.length})
                   </TabsTrigger>
-                  <TabsTrigger value="errors">
-                    Errors ({errorRows.length})
+                  <TabsTrigger value="errors" className="flex-1 md:flex-none">
+                    Erreurs ({errorRows.length})
                   </TabsTrigger>
                 </TabsList>
+                </div>
 
                 <TabsContent value="all" className="mt-4">
                   <RowsTable rows={allRows} />

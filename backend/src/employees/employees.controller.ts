@@ -29,6 +29,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
+import { TrucksService } from '../trucks/trucks.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { CreateEmployeeAccountDto } from './dto/create-account.dto';
@@ -43,7 +44,10 @@ import { UserRole } from '../auth/dto/register.dto';
 @ApiBearerAuth()
 @Controller('employees')
 export class EmployeesController {
-  constructor(private readonly employeesService: EmployeesService) {}
+  constructor(
+    private readonly employeesService: EmployeesService,
+    private readonly trucksService: TrucksService,
+  ) {}
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -65,14 +69,14 @@ export class EmployeesController {
 
   @Get('me/profile')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Get the authenticated employee\'s own profile' })
+  @ApiOperation({ summary: "Get the authenticated employee's own profile" })
   getMyProfile(@Request() req: any) {
     return this.employeesService.getMyProfile(req.user.id);
   }
 
   @Patch('me/profile')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Update the authenticated employee\'s own profile' })
+  @ApiOperation({ summary: "Update the authenticated employee's own profile" })
   updateMyProfile(@Request() req: any, @Body() dto: UpdateProfileDto) {
     return this.employeesService.updateMyProfile(req.user.id, dto);
   }
@@ -89,6 +93,20 @@ export class EmployeesController {
   @ApiOperation({ summary: 'Upcoming assignments for the authenticated employee' })
   getMyAssignments(@Request() req: any) {
     return this.employeesService.getMyAssignments(req.user.id);
+  }
+
+  @Get('me/express')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Express assignments for the authenticated employee' })
+  getMyExpress(@Request() req: any) {
+    return this.employeesService.getMyExpress(req.user.id);
+  }
+
+  @Get('me/inspections')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Pending truck inspections for the authenticated employee' })
+  getMyInspections(@Request() req: any) {
+    return this.trucksService.listMyInspections(req.user.id);
   }
 
   // ── Single employee ────────────────────────────────────────────────────────
@@ -143,7 +161,8 @@ export class EmployeesController {
   @ApiParam({ name: 'id', description: 'Employee UUID' })
   upsertPayRates(
     @Param('id') id: string,
-    @Body() body: { rates: { tourType: string; chauffeurRate: number; aideRate?: number | null }[] },
+    @Body()
+    body: { rates: { tourType: string; chauffeurRate: number; aideRate?: number | null }[] },
     @Request() req: any,
   ) {
     return this.employeesService.upsertPayRates(id, body.rates as any, req.user.id);
@@ -201,11 +220,7 @@ export class EmployeesController {
   @Get(':id/documents/:docId/download')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Download a document' })
-  async downloadDocument(
-    @Param('id') id: string,
-    @Param('docId') docId: string,
-    @Res() res: any,
-  ) {
+  async downloadDocument(@Param('id') id: string, @Param('docId') docId: string, @Res() res: any) {
     const doc = await this.employeesService.findDocument(id, docId);
     if (!existsSync(doc.filePath)) {
       return res.status(404).json({ message: 'File not found on disk' });
