@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
-  ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck,
+  ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck, RefreshCw,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,41 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/useToast';
 import { ToastContainer } from '@/components/ui/toast';
+
+// ─── Sync Button ──────────────────────────────────────────────────────────────
+
+function SyncButton() {
+  const queryClient = useQueryClient();
+  const { success, error: showError, toasts, removeToast } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: () => api.post<{ created: number; updated: number; skipped: number; errors: string[] }>('/settings/google/sync'),
+    onSuccess: ({ data }) => {
+      queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+      const msg = `${data.created} ajoutées · ${data.updated} mises à jour`;
+      success(`Synchronisation terminée — ${msg}`);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message || 'Erreur de synchronisation'),
+  });
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Button
+        variant="outline"
+        size="sm"
+        className="flex items-center gap-1.5 h-9 md:h-10"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+        title="Synchroniser depuis Google Sheets"
+      >
+        <RefreshCw size={15} className={mutation.isPending ? 'animate-spin' : ''} />
+        <span className="hidden sm:inline">{mutation.isPending ? 'Sync...' : 'Actualiser'}</span>
+      </Button>
+    </>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -742,6 +778,16 @@ export default function Tours() {
   const [status, setStatus]         = useState('');
   const [confirmFilter, setConfirm] = useState('');
   const [search, setSearch]         = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // History pagination
   const now = new Date();
@@ -849,45 +895,72 @@ export default function Tours() {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl md:text-2xl font-bold">Tournées</h1>
-        <Button onClick={() => setCreateOpen(true)} size="sm" className="flex items-center gap-1.5 h-9 md:h-10">
-          <Plus size={15} /> <span className="hidden sm:inline">Nouvelle</span> tournée
-        </Button>
-      </div>
+        {/* Wrap all buttons in one relative container so the popup anchors to the right edge */}
+        <div ref={filterRef} className="relative flex items-center gap-2">
+          {(() => {
+            const activeCount = [platform, status, confirmFilter, search].filter(Boolean).length;
+            return (
+              <button
+                onClick={() => setFilterOpen(o => !o)}
+                className={`relative h-9 w-9 flex items-center justify-center rounded-lg border text-gray-600 transition-colors ${filterOpen ? 'bg-blue-50 border-blue-300 text-blue-600' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+                title="Filtres"
+              >
+                <SlidersHorizontal size={16} />
+                {activeCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-blue-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">
+                    {activeCount}
+                  </span>
+                )}
+              </button>
+            );
+          })()}
 
-      {/* ── Filter bar ─────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Plateforme</label>
-            <select className={FILTER_SEL} value={platform} onChange={e => setPlatform(e.target.value)}>
-              <option value="">Toutes</option>
-              {(platforms ?? []).map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Statut</label>
-            <select className={FILTER_SEL} value={status} onChange={e => setStatus(e.target.value)}>
-              <option value="">Tous</option>
-              {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Confirmation</label>
-            <select className={FILTER_SEL} value={confirmFilter} onChange={e => setConfirm(e.target.value)}>
-              <option value="">Tous</option>
-              <option value="CONFIRMED">Confirmé</option>
-              <option value="UNCONFIRMED">En attente</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Code tournée</label>
-            <Input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} className="h-9 text-sm" />
-          </div>
-          <div className="flex items-end">
-            <button onClick={clearFilters} className="w-full h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm hover:bg-gray-50 flex items-center justify-center gap-2 text-gray-600">
-              <X size={14} /> Effacer
-            </button>
-          </div>
+          <SyncButton />
+          <Button onClick={() => setCreateOpen(true)} size="sm" className="flex items-center gap-1.5 h-9 md:h-10">
+            <Plus size={15} /> <span className="hidden sm:inline">Nouvelle</span> tournée
+          </Button>
+
+          {filterOpen && (
+            <div className="absolute right-0 top-11 w-64 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-4 space-y-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Filtres</p>
+              <select
+                className="w-full h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={platform} onChange={e => setPlatform(e.target.value)}
+              >
+                <option value="">Toutes les plateformes</option>
+                {(platforms ?? []).map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+              </select>
+              <select
+                className="w-full h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={status} onChange={e => setStatus(e.target.value)}
+              >
+                <option value="">Tous les statuts</option>
+                {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+              <select
+                className="w-full h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={confirmFilter} onChange={e => setConfirm(e.target.value)}
+              >
+                <option value="">Toutes confirmations</option>
+                <option value="CONFIRMED">Confirmé</option>
+                <option value="UNCONFIRMED">En attente</option>
+              </select>
+              <input
+                placeholder="Rechercher par code..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {(platform || status || confirmFilter || search) && (
+                <button
+                  onClick={() => { clearFilters(); setFilterOpen(false); }}
+                  className="w-full h-8 rounded-lg border border-gray-200 text-xs text-gray-500 hover:bg-gray-50 flex items-center justify-center gap-1.5"
+                >
+                  <X size={12} /> Effacer les filtres
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -88,11 +88,67 @@ export class BoulangerParserService {
   }
 
   /**
+   * Same as parseFile but accepts a Buffer — used by Google Sheets sync.
+   */
+  async parseBuffer(buffer: Buffer): Promise<ParseResult> {
+    const workbook = new ExcelJS.Workbook();
+    await (workbook.xlsx as any).load(buffer);
+
+    const sheetNames = workbook.worksheets.map((ws) => ws.name);
+    this.logger.log(`Buffer sheets found: ${sheetNames.join(', ')}`);
+
+    const alfortSheet = workbook.worksheets.find(
+      (ws) =>
+        ws.name.toLowerCase().includes('alfortville') ||
+        ws.name.toLowerCase().includes('mise à quai alfortville') ||
+        ws.name.toLowerCase().includes('f166'),
+    );
+
+    if (alfortSheet) {
+      return this.parseAlfortville(alfortSheet);
+    }
+
+    if (sheetNames.some((n) => n.trim() === 'Historique')) {
+      return this.parseGaronorBuffer(buffer, this.tomorrowDate());
+    }
+
+    throw new BadRequestException(
+      `Cannot detect file family. Sheets found: ${sheetNames.slice(0, 8).join(', ')}.`,
+    );
+  }
+
+  private parseGaronorBuffer(buffer: Buffer, date: Date): ParseResult {
+    const errors: string[] = [];
+    const day = date.getDate();
+    const sheetName = String(day);
+
+    const wb = XLSX.read(buffer, { cellFormula: false, cellDates: true });
+
+    if (!wb.Sheets[sheetName]) {
+      const available = wb.SheetNames.filter((n) => /^([1-9]|[12]\d|3[01])$/.test(n.trim())).join(
+        ', ',
+      );
+      throw new BadRequestException(
+        `Sheet '${sheetName}' (tomorrow) not found. Available day sheets: ${available || 'none'}.`,
+      );
+    }
+
+    // Delegate to same grid parsing as parseGaronor — re-use by reading via XLSX
+    const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
+      header: 1,
+      defval: null,
+      blankrows: false,
+    });
+
+    return this.parseGaronorGrid(grid, sheetName, date, errors);
+  }
+
+  /**
    * Returns tomorrow's date at local midnight.
    * Uses local-time arithmetic (new Date → setDate) so getDate() gives the correct
    * day number regardless of server timezone — no UTC/ISO string parsing involved.
    */
-  private tomorrowDate(): Date {
+  public tomorrowDate(): Date {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(0, 0, 0, 0);
@@ -199,6 +255,72 @@ export class BoulangerParserService {
     };
   }
 
+  /**
+   * Grid-based Alfortville parser — accepts a raw 2-D array (from Sheets API or SheetJS).
+   * Column indices are 0-based, matching the Sheets API values response.
+   */
+  public parseAlfortvilleGrid(grid: any[][], sheetName: string): ParseResult {
+    const errors: string[] = [];
+    const allRows: ParsedTourRow[] = [];
+
+    const rawDate = grid[0]?.[1] ?? null; // B1 = index 1
+    const date = this.readCellDateLocal(rawDate);
+    if (!date) errors.push(`Row 1: Cannot parse date from B1: ${rawDate}`);
+
+    const alfortDateStr = date
+      ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      : new Date().toISOString().split('T')[0];
+
+    const row2 = grid[1] ?? [];
+    const blocks = [
+      { colOffset: 1, horaire: this.normalizeTime(String(row2[1] ?? '')) },
+      { colOffset: 12, horaire: this.normalizeTime(String(row2[12] ?? '')) },
+      { colOffset: 24, horaire: this.normalizeTime(String(row2[24] ?? '')) },
+      { colOffset: 35, horaire: this.normalizeTime(String(row2[35] ?? '')) },
+    ];
+
+    for (let rowNum = 4; rowNum <= 28; rowNum++) {
+      const r = grid[rowNum - 1];
+      if (!r) continue;
+      for (const block of blocks) {
+        const o = block.colOffset;
+        const trnRaw = r[o + 1] ?? null;
+        const societeRaw = r[o + 2] ?? null;
+        if (!trnRaw && !societeRaw) continue;
+        const tourNumber = this.parseTourNumber(trnRaw);
+        if (tourNumber === null) continue;
+        allRows.push({
+          tourNumber,
+          tourType: this.deriveTourType(tourNumber, String(societeRaw || '')),
+          platform: 'F166',
+          date: date || new Date(),
+          dateStr: alfortDateStr,
+          horaire: block.horaire,
+          quai: r[o] != null ? String(r[o]).trim() : null,
+          nbColis: null,
+          prestataire: String(societeRaw || '').trim(),
+          immatriculation: this.cleanPlate(r[o + 3]),
+          equipage1: r[o + 4] ? String(r[o + 4]).trim() : null,
+          equipage2: null,
+          telephone: r[o + 5] ? this.cleanPhone(String(r[o + 5])) : null,
+          sourceSheet: sheetName,
+          sourceRow: rowNum,
+        });
+      }
+    }
+
+    const stpRows = allRows.filter((r) => this.isStp(r.prestataire));
+    this.logger.log(`Alfortville grid: ${allRows.length} total rows, ${stpRows.length} STP`);
+    return {
+      platform: 'F166',
+      date: date || new Date(),
+      allRows,
+      stpRows,
+      totalRows: allRows.length,
+      parseErrors: errors,
+    };
+  }
+
   // ─────────────────────────────────────────────
   // GARONOR PARSER  (uses SheetJS — reads every row from raw XML)
   // ─────────────────────────────────────────────
@@ -221,11 +343,9 @@ export class BoulangerParserService {
    *   H(7) Équipage2  · I(8) Numéro(phone) · J(9) Immatriculation
    */
   private parseGaronor(filePath: string, date: Date): ParseResult {
-    const errors: string[] = [];
     const day = date.getDate();
     const sheetName = String(day);
 
-    // Read the whole workbook with SheetJS (cellFormula:false → use cached values)
     const wb = XLSX.readFile(filePath, { cellFormula: false, cellDates: true });
 
     if (!wb.Sheets[sheetName]) {
@@ -238,25 +358,26 @@ export class BoulangerParserService {
       );
     }
 
-    // sheet_to_json with header:1 gives a plain 2-D array, defval:null fills empty cells
     const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
       header: 1,
       defval: null,
     });
 
-    // ── Date for this sheet ─────────────────────────────────────────────────
-    // The day number comes from the sheet name itself (the same value that was
-    // used to open this sheet), year and month from tomorrowDate()'s local parts.
-    // These integers are the ground truth — we never re-derive from a Date object
-    // via toISOString() / getUTCDate() because Node.js timezone handling can shift
-    // the calendar day depending on when/how the Date was constructed.
-    const sheetDay = parseInt(sheetName, 10); // e.g. 5
-    const sheetYear = date.getFullYear(); // local year from tomorrowDate
-    const sheetMon = date.getMonth() + 1; // local month (1-indexed)
-    const sheetDateStr = `${sheetYear}-${String(sheetMon).padStart(2, '0')}-${String(sheetDay).padStart(2, '0')}`;
-    const sheetDate = new Date(sheetYear, sheetMon - 1, sheetDay); // local midnight for backward compat
+    return this.parseGaronorGrid(grid, sheetName, date, []);
+  }
 
-    // Log what B2 actually contains (diagnostic only — not used for the date)
+  public parseGaronorGrid(
+    grid: any[][],
+    sheetName: string,
+    date: Date,
+    errors: string[],
+  ): ParseResult {
+    const sheetDay = parseInt(sheetName, 10);
+    const sheetYear = date.getFullYear();
+    const sheetMon = date.getMonth() + 1;
+    const sheetDateStr = `${sheetYear}-${String(sheetMon).padStart(2, '0')}-${String(sheetDay).padStart(2, '0')}`;
+    const sheetDate = new Date(sheetYear, sheetMon - 1, sheetDay);
+
     const rawB2 = grid[1]?.[1];
     this.logger.log(
       `Garonor: sheet '${sheetName}' — ${grid.length} rows, ` +
@@ -266,27 +387,24 @@ export class BoulangerParserService {
     const allRows: ParsedTourRow[] = [];
 
     for (let i = 3; i < grid.length; i++) {
-      // i=3 → Excel row 4 (data start)
       const r = grid[i];
       if (!r) continue;
 
-      const tournee = r[3]; // col D — skip if null/empty
-      const prestataire = r[5]; // col F — skip if null/empty
+      const tournee = r[3];
+      const prestataire = r[5];
       if (tournee == null || tournee === '') continue;
       if (prestataire == null || String(prestataire).trim() === '') continue;
       const tourNumber = this.parseTourNumber(tournee);
       if (tourNumber === null) continue;
 
-      const quantite = r[0]; // A
-      const horaire = r[1]; // B
-      // Quai (col C) may be a number (e.g. 17) or a named string (e.g. 'RETOUR A', 'RETOUR B').
-      // The Tour.quai field is String? — both forms are stored as strings.
-      const quai = r[2]; // C
-      const specificite = r[4]; // E
-      const equipage1 = r[6]; // G
-      const equipage2 = r[7]; // H
-      const telephone = r[8]; // I
-      const immat = r[9]; // J
+      const quantite = r[0];
+      const horaire = r[1];
+      const quai = r[2];
+      const specificite = r[4];
+      const equipage1 = r[6];
+      const equipage2 = r[7];
+      const telephone = r[8];
+      const immat = r[9];
 
       allRows.push({
         tourNumber,
@@ -396,12 +514,25 @@ export class BoulangerParserService {
       return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
     }
 
-    // Case 2: French "DD/MM/YYYY" string
+    // Case 2: French date strings
     if (typeof raw === 'string') {
-      const fr = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      const s = raw.trim();
+      // "DD/MM/YYYY" full date
+      const fr = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (fr) return new Date(Number(fr[3]), Number(fr[2]) - 1, Number(fr[1]));
+      // "DD/MM" short date — assume current year; if result is in the past use next year
+      const frShort = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (frShort) {
+        const d = Number(frShort[1]);
+        const m = Number(frShort[2]) - 1;
+        const now = new Date();
+        let year = now.getFullYear();
+        const candidate = new Date(year, m, d);
+        if (candidate < now) year++;
+        return new Date(year, m, d);
+      }
       // ISO or other string
-      const iso = new Date(raw);
+      const iso = new Date(s);
       if (!isNaN(iso.getTime())) return new Date(iso.getFullYear(), iso.getMonth(), iso.getDate());
     }
 

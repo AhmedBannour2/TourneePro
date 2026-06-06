@@ -1,6 +1,5 @@
-import { Bell } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { Button } from '@/components/ui/button';
+import NotificationBell from './NotificationBell';
 
 interface HeaderProps {
   title: string;
@@ -25,9 +24,7 @@ export default function Header({ title }: HeaderProps) {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
-          <Button variant="ghost" size="icon" className="relative w-9 h-9" title="Notifications">
-            <Bell size={18} className="text-gray-600" />
-          </Button>
+          <NotificationBell />
 
           {user && (
             <div className="flex items-center gap-2">

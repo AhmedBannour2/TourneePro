@@ -155,6 +155,20 @@ export class MailService implements OnModuleInit {
     );
   }
 
+  async sendRaw(params: { to: string; subject: string; text: string }): Promise<void> {
+    if (!this.transporter) {
+      this.logger.debug('Email skipped — SMTP not configured');
+      return;
+    }
+    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    await this.transporter.sendMail({
+      from,
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+    });
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private formatDate(date: Date): string {

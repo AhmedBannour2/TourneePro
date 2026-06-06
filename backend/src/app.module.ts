@@ -11,6 +11,9 @@ import { ToursModule } from './tours/tours.module';
 import { ExpressDeliveriesModule } from './express-deliveries/express-deliveries.module';
 import { WorkedDaysModule } from './worked-days/worked-days.module';
 import { SettingsModule } from './settings/settings.module';
+import { SystemConfigModule } from './system-config/system-config.module';
+import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +29,9 @@ import { SettingsModule } from './settings/settings.module';
     ExpressDeliveriesModule,
     WorkedDaysModule,
     SettingsModule,
+    SystemConfigModule,
+    GoogleSheetsModule,
+    NotificationsModule,
   ],
   controllers: [],
   providers: [],

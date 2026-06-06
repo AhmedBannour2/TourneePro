@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
   Truck as TruckIcon, History, Wrench, Loader2,
   ClipboardCheck, CheckCircle2, AlertTriangle, User,
-  EllipsisVertical, ChevronRight,
+  EllipsisVertical, ChevronRight, FileText, Upload,
+  Eye, CalendarClock,
 } from 'lucide-react';
 import { api, API_URL } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -39,6 +40,41 @@ interface Truck {
   notes: string | null;
   createdAt: string;
   responsibleEmployee: { id: string; firstName: string | null; lastName: string | null; name: string } | null;
+}
+
+type TruckDocumentType = 'ASSURANCE' | 'CONTROLE_TECHNIQUE' | 'CONTROLE_HAYON' | 'CARTE_GRISE';
+
+interface TruckDocument {
+  id: string;
+  type: TruckDocumentType;
+  startDate: string | null;
+  expiryDate: string | null;
+  filePath: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  notes: string | null;
+  createdAt: string;
+  uploadedBy: { email: string } | null;
+}
+
+const DOC_TYPE_LABELS: Record<TruckDocumentType, string> = {
+  ASSURANCE: 'Assurance',
+  CONTROLE_TECHNIQUE: 'Contrôle technique',
+  CONTROLE_HAYON: 'Contrôle hayon',
+  CARTE_GRISE: 'Carte grise',
+};
+
+const ALL_DOC_TYPES: TruckDocumentType[] = ['ASSURANCE', 'CONTROLE_TECHNIQUE', 'CONTROLE_HAYON', 'CARTE_GRISE'];
+
+function docStatus(expiryDate: string | null): { label: string; cls: string } {
+  if (!expiryDate) return { label: 'Non renseigné', cls: 'bg-gray-100 text-gray-500' };
+  const now = new Date();
+  const exp = new Date(expiryDate);
+  const daysLeft = Math.ceil((exp.getTime() - now.getTime()) / 86400000);
+  if (daysLeft < 0) return { label: 'Expiré', cls: 'bg-red-100 text-red-700' };
+  if (daysLeft <= 7) return { label: `Expire dans ${daysLeft}j`, cls: 'bg-orange-100 text-orange-700' };
+  if (daysLeft <= 30) return { label: `Expire dans ${daysLeft}j`, cls: 'bg-yellow-100 text-yellow-700' };
+  return { label: 'Valide', cls: 'bg-green-100 text-green-700' };
 }
 
 interface TruckFormData {
@@ -152,6 +188,18 @@ export default function Trucks() {
   const [requestingInspectionForTruckId, setRequestingInspectionForTruckId] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
+  // Panel tab state
+  const [activeTab, setActiveTab] = useState('documents');
+
+  // Document upload state
+  const [docType, setDocType] = useState<TruckDocumentType>('ASSURANCE');
+  const [docStartDate, setDocStartDate] = useState('');
+  const [docExpiryDate, setDocExpiryDate] = useState('');
+  const [docNotes, setDocNotes] = useState('');
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docFormOpen, setDocFormOpen] = useState(false);
+  const docFileRef = useRef<HTMLInputElement>(null);
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: trucks, isLoading } = useQuery<Truck[]>({
@@ -241,6 +289,37 @@ export default function Trucks() {
       api.post(`/inspections/${inspectionId}/acknowledge`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['truck-inspections', historyTruckId] }),
     onError: (err: any) => alert(err?.response?.data?.message || 'Erreur validation'),
+  });
+
+  const { data: truckDocuments, isLoading: docsLoading } = useQuery<TruckDocument[]>({
+    queryKey: ['truck-documents', historyTruckId],
+    queryFn: async () => (await api.get<TruckDocument[]>(`/trucks/${historyTruckId}/documents`)).data,
+    enabled: !!historyTruckId,
+  });
+
+  const addDocMutation = useMutation({
+    mutationFn: async () => {
+      const fd = new FormData();
+      fd.append('type', docType);
+      if (docStartDate) fd.append('startDate', docStartDate);
+      if (docExpiryDate) fd.append('expiryDate', docExpiryDate);
+      if (docNotes) fd.append('notes', docNotes);
+      if (docFile) fd.append('file', docFile);
+      await api.post(`/trucks/${historyTruckId}/documents`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['truck-documents', historyTruckId] });
+      setDocFormOpen(false);
+      setDocStartDate(''); setDocExpiryDate(''); setDocNotes(''); setDocFile(null);
+    },
+    onError: (err: any) => alert(err?.response?.data?.message || 'Erreur'),
+  });
+
+  const deleteDocMutation = useMutation({
+    mutationFn: async (docId: string) => api.delete(`/trucks/${historyTruckId}/documents/${docId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['truck-documents', historyTruckId] }),
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -513,58 +592,204 @@ export default function Trucks() {
           setRepairError('');
           setExpandedInspection(null);
           setInspectionError('');
+          setDocFormOpen(false);
+          setDocFile(null);
+          setActiveTab('documents');
         }
       }}>
         <SheetContent side="right" className="sm:max-w-2xl w-full overflow-y-auto">
           <div className="mb-6">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold">{historyTruck?.immatriculation}</h2>
-              <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
-                <Badge className={historyTruck?.status === 'in_repair' ? 'bg-orange-100 text-orange-800' : historyTruck?.isAvailable ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                  {historyTruck?.status === 'in_repair' ? 'En réparation' : historyTruck?.isAvailable ? 'Disponible' : 'Indisponible'}
-                </Badge>
-              </p>
-              {historyTruck?.responsibleEmployee && (
-                <p className="text-sm text-gray-600 mt-2 flex items-center gap-1">
-                  <User className="h-3.5 w-3.5 text-blue-500" />Chauffeur: {historyTruck.responsibleEmployee.name}
-                </p>
-              )}
-            </div>
-            <div className="border-t pt-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Button size="sm" variant="outline" onClick={() => openEdit(historyTruck!)} className="flex items-center justify-center gap-1.5">
-                  <Pencil className="h-4 w-4" />Modifier
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setExpandedInspection(null)} className="flex items-center justify-center gap-1.5" disabled={isLoading}>
-                  <History className="h-4 w-4" />Historique
-                </Button>
-                {isAdmin && (
-                  <Button size="sm" variant="outline" onClick={requestInspection} disabled={requestingInspection} className="flex items-center justify-center gap-1.5">
-                    {requestingInspection ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
-                    Contrôle
-                  </Button>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold">{historyTruck?.immatriculation}</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge className={historyTruck?.status === 'in_repair' ? 'bg-orange-100 text-orange-800' : historyTruck?.isAvailable ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                    {historyTruck?.status === 'in_repair' ? 'En réparation' : historyTruck?.isAvailable ? 'Disponible' : 'Indisponible'}
+                  </Badge>
+                </div>
+                {historyTruck?.responsibleEmployee && (
+                  <p className="text-sm text-gray-600 mt-1.5 flex items-center gap-1">
+                    <User className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                    {historyTruck.responsibleEmployee.name}
+                  </p>
                 )}
-                <Button size="sm" variant="outline" onClick={() => historyTruck && toggleMutation.mutate({ id: historyTruck.id, isAvailable: !historyTruck.isAvailable })} disabled={toggleMutation.isPending} className="flex items-center justify-center gap-1.5">
-                  {toggleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ToggleRight className="h-4 w-4" />}
-                  Disponibilité
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <Button
+                  variant="ghost" size="sm" className="h-8 w-8 p-0"
+                  onClick={() => openEdit(historyTruck!)}
+                  title="Modifier"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost" size="sm" className="h-8 w-8 p-0"
+                  onClick={() => historyTruck && toggleMutation.mutate({ id: historyTruck.id, isAvailable: !historyTruck.isAvailable })}
+                  disabled={toggleMutation.isPending}
+                  title="Changer disponibilité"
+                >
+                  {toggleMutation.isPending
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : historyTruck?.isAvailable
+                      ? <ToggleRight className="h-4 w-4 text-green-600" />
+                      : <ToggleLeft className="h-4 w-4 text-gray-400" />}
                 </Button>
               </div>
             </div>
           </div>
 
-          <Tabs defaultValue="assignments">
-            <TabsList className="w-full mb-4">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="w-full mb-4 grid grid-cols-4">
+              <TabsTrigger value="documents" className="flex-1">
+                <FileText className="h-3.5 w-3.5 mr-1" />Documents
+              </TabsTrigger>
               <TabsTrigger value="assignments" className="flex-1">
-                Tournées {history && `(${history.assignments.length})`}
+                Tournées
               </TabsTrigger>
               <TabsTrigger value="repairs" className="flex-1">
-                Réparations {history && `(${history.repairs.length})`}
+                Réparations
               </TabsTrigger>
               <TabsTrigger value="inspections" className="flex-1">
                 <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
-                Contrôles {inspections && `(${inspections.length})`}
+                Contrôles
               </TabsTrigger>
             </TabsList>
+
+            {/* ── Documents ──────────────────────────────────────────────────── */}
+            <TabsContent value="documents" className="space-y-3">
+              {/* Summary cards per type */}
+              {ALL_DOC_TYPES.map((type) => {
+                const docs = (truckDocuments ?? []).filter((d) => d.type === type);
+                const latest = docs[0] ?? null;
+                const st = docStatus(latest?.expiryDate ?? null);
+                return (
+                  <div key={type} className="border rounded-lg p-4 bg-white">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <p className="font-semibold text-sm">{DOC_TYPE_LABELS[type]}</p>
+                        {latest?.expiryDate && (
+                          <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                            <CalendarClock className="h-3 w-3" />
+                            {latest.startDate && `Du ${new Date(latest.startDate).toLocaleDateString('fr-FR')} · `}
+                            Expire le {new Date(latest.expiryDate).toLocaleDateString('fr-FR')}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge className={`text-xs ${st.cls}`}>{st.label}</Badge>
+                        {latest?.filePath && (
+                          <a
+                            href={`${API_URL}/trucks/${historyTruckId}/documents/${latest.id}/file`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded hover:bg-gray-100"
+                            title="Voir le fichier"
+                          >
+                            <Eye className="h-4 w-4 text-blue-500" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* History entries */}
+                    {docs.length > 1 && (
+                      <div className="mt-2 space-y-1 border-t pt-2">
+                        {docs.slice(1).map((d) => (
+                          <div key={d.id} className="flex items-center justify-between text-xs text-gray-500">
+                            <span>
+                              {d.expiryDate ? `Expiré le ${new Date(d.expiryDate).toLocaleDateString('fr-FR')}` : 'Sans date'}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {d.filePath && (
+                                <a href={`${API_URL}/trucks/${historyTruckId}/documents/${d.id}/file`} target="_blank" rel="noopener noreferrer">
+                                  <Eye className="h-3.5 w-3.5 text-blue-400" />
+                                </a>
+                              )}
+                              <button onClick={() => deleteDocMutation.mutate(d.id)} className="hover:text-red-500">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Delete latest */}
+                    {latest && (
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          onClick={() => deleteDocMutation.mutate(latest.id)}
+                          className="text-xs text-red-400 hover:text-red-600 hover:underline"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add document form */}
+              {!docFormOpen ? (
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setDocFormOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" /> Ajouter / Renouveler un document
+                </Button>
+              ) : (
+                <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Upload className="h-4 w-4" /> Nouveau document</h3>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Type</Label>
+                    <select
+                      value={docType}
+                      onChange={(e) => setDocType(e.target.value as TruckDocumentType)}
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      {ALL_DOC_TYPES.map((t) => (
+                        <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Date de début</Label>
+                      <Input type="date" value={docStartDate} onChange={(e) => setDocStartDate(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Date d'expiration</Label>
+                      <Input type="date" value={docExpiryDate} onChange={(e) => setDocExpiryDate(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Fichier (PDF ou image)</Label>
+                    <input
+                      ref={docFileRef}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      className="hidden"
+                      onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => docFileRef.current?.click()}
+                      className="w-full border border-dashed border-gray-300 rounded-md py-2 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-500"
+                    >
+                      {docFile ? docFile.name : 'Choisir un fichier…'}
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Notes (optionnel)</Label>
+                    <Input value={docNotes} onChange={(e) => setDocNotes(e.target.value)} placeholder="Ex: renouvellement annuel…" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => addDocMutation.mutate()} disabled={addDocMutation.isPending}>
+                      {addDocMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                      Enregistrer
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setDocFormOpen(false)}>Annuler</Button>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
 
             {/* ── Assignment History ──────────────────────────────────────────── */}
             <TabsContent value="assignments">

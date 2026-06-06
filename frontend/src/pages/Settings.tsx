@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   User, Lock, FileText, Upload, Download, Trash2,
   Loader2, CheckCircle, AlertCircle, Phone, MapPin, Mail, Info,
+  Link, RefreshCw, CheckCircle2, Unlink,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, API_URL } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -114,6 +115,231 @@ function Feedback({ ok, msg }: { ok: boolean; msg: string }) {
       {ok ? <CheckCircle className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
       {msg}
     </div>
+  );
+}
+
+// ── Google Sheets Card ─────────────────────────────────────────────────────────
+
+function GoogleSheetsCard() {
+  const queryClient = useQueryClient();
+  const [sheet1, setSheet1] = useState('');
+  const [sheet2, setSheet2] = useState('');
+  const [urlMsg, setUrlMsg] = useState({ ok: false, msg: '' });
+  const [callbackMsg, setCallbackMsg] = useState({ ok: false, msg: '' });
+
+  // Read ?google=connected|error query params set by the OAuth callback redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const google = params.get('google');
+    if (google === 'connected') {
+      const email = params.get('email') ?? '';
+      setCallbackMsg({ ok: true, msg: `Compte Google connecté${email ? ` : ${email}` : ''}.` });
+      queryClient.invalidateQueries({ queryKey: ['google-status'] });
+      // Clean up the URL so the message doesn't reappear on refresh
+      window.history.replaceState({}, '', '/settings');
+    } else if (google === 'error') {
+      const message = params.get('message') ?? 'Erreur de connexion Google.';
+      setCallbackMsg({ ok: false, msg: message });
+      window.history.replaceState({}, '', '/settings');
+    }
+  }, [queryClient]);
+
+  const { data: status, isLoading } = useQuery<{
+    connected: boolean; email: string | null; sheet1Url: string | null; sheet2Url: string | null;
+  }>({
+    queryKey: ['google-status'],
+    queryFn: () => api.get('/settings/google/status').then((r) => r.data),
+  });
+
+  // Pre-fill URL fields when status loads
+  useEffect(() => {
+    if (status?.sheet1Url) setSheet1(status.sheet1Url);
+    if (status?.sheet2Url) setSheet2(status.sheet2Url);
+  }, [status?.sheet1Url, status?.sheet2Url]);
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => api.delete('/settings/google/disconnect'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['google-status'] }),
+  });
+
+  const saveUrlsMutation = useMutation({
+    mutationFn: () => api.patch('/settings/google/sheets', { url1: sheet1, url2: sheet2 }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['google-status'] });
+      setUrlMsg({ ok: true, msg: 'Liens enregistrés.' });
+    },
+    onError: (err: any) => setUrlMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur.' }),
+  });
+
+  return (
+    <Card className="p-6 space-y-4">
+      <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+        <RefreshCw className="w-4 h-4 text-gray-500" /> Synchronisation Google Sheets
+      </h2>
+
+      {/* Info */}
+      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        <span>
+          Connectez le compte Google qui a accès aux feuilles Boulanger. Seul un token de lecture
+          est stocké — jamais votre mot de passe. Vous pouvez changer de compte à tout moment.
+        </span>
+      </div>
+
+      {/* Callback result message */}
+      {callbackMsg.msg && <Feedback ok={callbackMsg.ok} msg={callbackMsg.msg} />}
+
+      {/* Connection status */}
+      {isLoading ? (
+        <Skeleton className="h-10 w-full" />
+      ) : status?.connected ? (
+        <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
+          <div className="flex items-center gap-2 text-sm text-green-800">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Connecté : <strong>{status.email}</strong></span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-8"
+            onClick={() => disconnectMutation.mutate()}
+            disabled={disconnectMutation.isPending}
+          >
+            <Unlink className="w-3.5 h-3.5 mr-1" />
+            Déconnecter
+          </Button>
+        </div>
+      ) : (
+        <a
+          href={`${API_URL}/auth/google`}
+          className="flex items-center justify-center gap-2 w-full border border-gray-300 rounded-lg py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Se connecter avec Google
+        </a>
+      )}
+
+      {/* Sheet URLs */}
+      <div className="space-y-3 pt-2 border-t">
+        <h3 className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+          <Link className="w-3.5 h-3.5 text-gray-400" /> Liens des feuilles Boulanger
+        </h3>
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Feuille 1 (ex: Garonor)</Label>
+            <Input
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              value={sheet1}
+              onChange={(e) => setSheet1(e.target.value)}
+              className="text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Feuille 2 (ex: Alfortville)</Label>
+            <Input
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              value={sheet2}
+              onChange={(e) => setSheet2(e.target.value)}
+              className="text-xs"
+            />
+          </div>
+        </div>
+        <Feedback ok={urlMsg.ok} msg={urlMsg.msg} />
+        <Button
+          size="sm"
+          onClick={() => { setUrlMsg({ ok: false, msg: '' }); saveUrlsMutation.mutate(); }}
+          disabled={saveUrlsMutation.isPending || (!sheet1 && !sheet2)}
+        >
+          {saveUrlsMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer les liens'}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ── Mail Config Card ───────────────────────────────────────────────────────────
+
+function MailConfigCard() {
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('587');
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [from, setFrom] = useState('');
+  const [msg, setMsg] = useState({ ok: false, msg: '' });
+  const [testMsg, setTestMsg] = useState({ ok: false, msg: '' });
+
+  useQuery({
+    queryKey: ['mail-config'],
+    queryFn: () => api.get('/settings/mail').then((r) => r.data),
+    onSuccess: (data: any) => {
+      if (data.host) setHost(data.host);
+      if (data.port) setPort(String(data.port));
+      if (data.user) setUser(data.user);
+      if (data.pass) setPass(data.pass);
+      if (data.from) setFrom(data.from);
+    },
+  } as any);
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.post('/settings/mail', { host, port: Number(port), user, pass, from }),
+    onSuccess: () => setMsg({ ok: true, msg: 'Configuration email enregistrée.' }),
+    onError: (err: any) => setMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur.' }),
+  });
+
+  return (
+    <Card className="p-6 space-y-4">
+      <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+        <Mail className="w-4 h-4 text-gray-500" /> Configuration email (SMTP)
+      </h2>
+
+      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        <span>
+          Pour Gmail : host = <strong>smtp.gmail.com</strong>, port = <strong>587</strong>.
+          Activez la validation en 2 étapes sur votre compte Google puis créez un
+          "Mot de passe d'application" sur <strong>myaccount.google.com/security</strong> — utilisez ce code de 16 caractères ici, pas votre vrai mot de passe.
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Serveur SMTP</Label>
+          <Input placeholder="smtp.gmail.com" value={host} onChange={(e) => setHost(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Port</Label>
+          <Input type="number" placeholder="587" value={port} onChange={(e) => setPort(e.target.value)} />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Adresse email</Label>
+        <Input type="email" placeholder="notifications@stp.fr" value={user} onChange={(e) => setUser(e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Mot de passe / App Password</Label>
+        <Input type="password" placeholder="••••••••••••••••" value={pass} onChange={(e) => setPass(e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Adresse expéditeur (From)</Label>
+        <Input type="email" placeholder="noreply@stp.fr" value={from} onChange={(e) => setFrom(e.target.value)} />
+      </div>
+
+      <Feedback ok={msg.ok} msg={msg.msg} />
+      <Feedback ok={testMsg.ok} msg={testMsg.msg} />
+
+      <Button
+        size="sm"
+        onClick={() => { setMsg({ ok: false, msg: '' }); saveMutation.mutate(); }}
+        disabled={saveMutation.isPending}
+      >
+        {saveMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer'}
+      </Button>
+    </Card>
   );
 }
 
@@ -643,6 +869,12 @@ export default function Settings() {
               </form>
             </Card>
           </div>
+
+          {/* Google Sheets */}
+          <GoogleSheetsCard />
+
+          {/* Mail config */}
+          <MailConfigCard />
 
           {/* Global pay rates */}
           <Card className="p-6 space-y-4">

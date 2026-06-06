@@ -67,10 +67,42 @@ Never edit migration SQL files manually.
 - Frontend UI components: shadcn/ui (Radix primitives in `src/components/ui/`)
 - Commit messages: conventional commits format (`feat:`, `fix:`, `chore:`, etc.)
 
-## Placeholder Pages — Do Not Implement Unless Asked
+## Built Pages — All Fully Implemented
 
-These frontend pages exist as stubs; backend CRUD is ready but UI is not built yet:
-- `frontend/src/pages/Employees.tsx`
-- `frontend/src/pages/ExpressDeliveries.tsx`
-- `frontend/src/pages/WorkedDays.tsx`
-- `frontend/src/pages/Settings.tsx`
+All pages are built and working as of June 2026. Do not treat any of these as stubs.
+
+### Dispatcher / Admin pages
+| Page | Status | Notes |
+|---|---|---|
+| `Tours.tsx` | ✅ Full | Filters, pagination, manual create, detail panel, confirmation flow, **Actualiser** button (Google Sheets sync) |
+| `Assignments.tsx` | ✅ Full | Date picker, unassigned list, assignment form, assigned table, mobile cards |
+| `Import.tsx` | ✅ Full | Excel upload → preview → commit; manual fallback kept alongside Google Sheets sync |
+| `Employees.tsx` | ✅ Full | List, inline edit, role/status filters, responsible truck, documents, pay rates panel |
+| `Trucks.tsx` | ✅ Full | Click-to-detail pattern, quick actions panel, inspection system, repair logs |
+| `ExpressDeliveries.tsx` | ✅ Full | Mission list grouped by date, create modal, detail panel, employee assign, photo upload |
+| `WorkedDays.tsx` | ✅ Full | Admin payroll tracking, employee/month filters, day CRUD, summary stats |
+| `Settings.tsx` | ✅ Full | Pay rates, Google Sheets OAuth connect/disconnect + sheet URLs, Mail SMTP config |
+| `Dashboard.tsx` | ✅ Full | Summary stats and quick-access cards |
+
+### Employee pages
+| Page | Status | Notes |
+|---|---|---|
+| `MyAssignments.tsx` | ✅ Full | Employee's own tours + express missions, inspection submit |
+| `MyWorkedDays.tsx` | ✅ Full | Employee's own payroll view by month |
+| `EmployeeDashboard.tsx` | ✅ Full | Employee home with upcoming assignments |
+
+## Google Sheets Sync
+
+Two Boulanger Google Sheets are synced via the **"Actualiser"** button on the Tours page:
+- Sheet 1 (Garonor): reads tomorrow's day-numbered tab
+- Sheet 2 (Alfortville): reads the main sheet + "Jours Fériés /Dimanche" sheet when present (Sundays/holidays)
+
+OAuth credentials stored in `backend/.env`. Admin can reconnect or swap accounts in Settings → Google Sheets.
+Sync is idempotent: re-running updates existing tours, never duplicates.
+
+## Pending / Not Yet Built
+
+- **Page consolidation**: merging Import + Tours + Assignments into a unified "Journée" view (discussed, not started)
+- **Mail service reads from DB**: Settings mail config saves to `system_config` table but `mail.service.ts` still reads from `.env`. Needs wiring so UI changes take effect without server restart.
+- **Auto-sync cron**: currently manual (Actualiser button). Could be automated to run each morning.
+- **Google Cloud migration**: OAuth project currently under personal Gmail (`couco1995@gmail.com`). Migrate to STP Gmail before production.

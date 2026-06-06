@@ -118,7 +118,8 @@ export default function Import() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['imports'] });
-      queryClient.invalidateQueries({ queryKey: ['tours'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-history'] });
       setConfirmDialogOpen(false);
       navigate('/tours');
     },

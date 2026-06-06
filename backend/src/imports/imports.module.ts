@@ -9,5 +9,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [ImportsController],
   providers: [ImportsService, ImportQueueService, BoulangerParserService],
+  exports: [BoulangerParserService],
 })
 export class ImportsModule {}

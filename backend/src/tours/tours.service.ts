@@ -12,6 +12,7 @@ import { ConfirmTourDto } from './dto/confirm-tour.dto';
 import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
 import { MailService } from '../notification/mail.service';
 import { WorkedDaysService } from '../worked-days/worked-days.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ConfirmationStatus, WorkedDayStatus, TourSource } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { CreateTourDto } from './dto/create-tour.dto';
@@ -24,6 +25,7 @@ export class ToursService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly workedDaysService: WorkedDaysService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: GetToursQueryDto) {
@@ -293,6 +295,39 @@ export class ToursService {
       this.logger.error('Assignment email failed', err.message),
     );
 
+    // In-app notifications for assigned employees
+    const dateStr = tour.date.toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const notifBase = {
+      type: 'TOUR_ASSIGNED' as const,
+      title: `Tournée ${tour.tourCode} assignée`,
+      message: `Vous êtes assigné(e) à la tournée ${tour.tourCode} le ${dateStr}`,
+      link: '/my-assignments',
+      metadata: { tourId: id, tourCode: tour.tourCode },
+    };
+    const chauffeurUserId = assignment.chauffeur
+      ? (
+          await this.prisma.employee.findUnique({
+            where: { id: assignment.chauffeurId! },
+            select: { userId: true },
+          })
+        )?.userId
+      : null;
+    const aideUserId = assignment.aide
+      ? (
+          await this.prisma.employee.findUnique({
+            where: { id: assignment.aideId! },
+            select: { userId: true },
+          })
+        )?.userId
+      : null;
+    if (chauffeurUserId)
+      this.notificationsService.create({ ...notifBase, userId: chauffeurUserId });
+    if (aideUserId) this.notificationsService.create({ ...notifBase, userId: aideUserId });
+
     return this.findOne(id);
   }
 
@@ -537,6 +572,15 @@ export class ToursService {
 
     // Ensure WorkedDay records exist, then confirm them all
     await this.ensureAndConfirmWorkedDays(tourId, tour);
+
+    // Notify dispatchers/admins that the tour was confirmed
+    this.notificationsService.createForRole(['ADMIN', 'DISPATCHER'], {
+      type: 'TOUR_CONFIRMED',
+      title: `Tournée ${tour.tourCode} confirmée`,
+      message: `${employee.name} a confirmé la tournée ${tour.tourCode}`,
+      link: '/tours',
+      metadata: { tourId, tourCode: tour.tourCode },
+    });
 
     return confirmation;
   }
