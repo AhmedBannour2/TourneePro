@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Link, useMatch } from 'react-router-dom';
 import {
-  LayoutDashboard, Truck, ClipboardList, Users, Car,
-  MoreHorizontal, X, Upload, Calendar, Settings, Zap,
-  CalendarCheck, SlidersHorizontal, LogOut,
+  LayoutDashboard, Truck, Users, Car, Zap,
+  Calendar, Settings, CalendarCheck, SlidersHorizontal, LogOut,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
@@ -11,28 +10,26 @@ import { useAuth } from '@/hooks/useAuth';
 // ── Nav definitions ────────────────────────────────────────────────────────────
 
 const adminMain = [
-  { path: '/',            label: 'Dashboard',    icon: LayoutDashboard, exact: true },
-  { path: '/tours',       label: 'Tournées',     icon: Truck,           exact: false },
-  { path: '/assignments', label: 'Affectation',  icon: ClipboardList,   exact: false },
-  { path: '/employees',   label: 'Employés',     icon: Users,           exact: false },
-  { path: '/trucks',      label: 'Camions',      icon: Car,             exact: false },
+  { path: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { path: '/tours',     label: 'Tournées',  icon: Truck,           exact: false },
+  { path: '/express',   label: 'Express',   icon: Zap,             exact: false },
+  { path: '/employees', label: 'Employés',  icon: Users,           exact: false },
+  { path: '/trucks',    label: 'Camions',   icon: Car,             exact: false },
 ] as const;
 
-const adminMore = [
-  { path: '/express',     label: 'Express',         icon: Zap },
-  { path: '/import',      label: 'Import Excel',     icon: Upload },
-  { path: '/worked-days', label: 'Jours travaillés', icon: Calendar },
-  { path: '/settings',    label: 'Paramètres',       icon: Settings },
+const adminSpeedDial = [
+  { label: 'Jours travaillés', icon: Calendar, path: '/worked-days', color: 'bg-blue-500' },
+  { label: 'Paramètres',       icon: Settings, path: '/settings',    color: 'bg-slate-700' },
 ] as const;
 
 const employeeMain = [
-  { path: '/my-assignments', label: 'Tournées',  icon: CalendarCheck,    exact: false },
-  { path: '/express',        label: 'Express',   icon: Zap,              exact: false },
-  { path: '/my-worked-days', label: 'Mes jours', icon: Calendar,         exact: false },
+  { path: '/',               label: 'Accueil',   icon: LayoutDashboard,   exact: true },
+  { path: '/my-assignments', label: 'Tournées',  icon: CalendarCheck,     exact: false },
+  { path: '/my-worked-days', label: 'Mes jours', icon: Calendar,          exact: false },
   { path: '/settings',       label: 'Profil',    icon: SlidersHorizontal, exact: false },
 ] as const;
 
-// ── NavTabItem — uses useMatch so it reliably tracks active state ──────────────
+// ── NavTabItem ─────────────────────────────────────────────────────────────────
 
 function NavTabItem({
   path,
@@ -63,36 +60,6 @@ function NavTabItem({
   );
 }
 
-// ── MoreDrawerItem — NavLink inside the "More" sheet ─────────────────────────
-
-function MoreItem({
-  path,
-  label,
-  icon: Icon,
-  onClose,
-}: {
-  path: string;
-  label: string;
-  icon: LucideIcon;
-  onClose: () => void;
-}) {
-  const match = useMatch({ path, end: false });
-  const active = !!match;
-
-  return (
-    <Link
-      to={path}
-      onClick={onClose}
-      className={`flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl text-center transition-colors ${
-        active ? 'bg-blue-50 text-blue-600' : 'text-gray-600'
-      }`}
-    >
-      <Icon size={22} />
-      <span className="text-[10px] font-medium leading-tight">{label}</span>
-    </Link>
-  );
-}
-
 // ── BottomNav ─────────────────────────────────────────────────────────────────
 
 export default function BottomNav() {
@@ -111,46 +78,63 @@ export default function BottomNav() {
     window.location.href = '/login';
   };
 
+  // Speed-dial items rendered bottom-to-top; delays 0→N so the closest item animates first
+  const dialItems = [
+    ...adminSpeedDial.map(({ label, icon, path, color }) => ({
+      label, icon, color,
+      onClick: () => setMoreOpen(false),
+      href: path,
+    })),
+    { label: 'Déconnexion', icon: LogOut, color: 'bg-red-500', onClick: handleLogout, href: null },
+  ];
+
   return (
     <>
-      {/* Backdrop + drawer — only mounted when open, so nothing leaks into the UI when closed */}
-      {moreOpen && (
+      {/* Speed-dial overlay */}
+      {!isEmployee && moreOpen && (
         <>
+          {/* Semi-transparent backdrop */}
           <div
             className="fixed inset-0 z-40 bg-black/40 md:hidden"
             onClick={() => setMoreOpen(false)}
           />
-          <div className="fixed left-0 right-0 z-50 bg-white rounded-t-2xl shadow-2xl border-t md:hidden animate-in slide-in-from-bottom duration-200"
-            style={{ bottom: '57px' }}
-          >
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <span className="font-semibold text-gray-800 text-sm">Plus</span>
-              <button
-                onClick={() => setMoreOpen(false)}
-                className="h-9 w-9 flex items-center justify-center rounded-full hover:bg-gray-100"
+
+          {/* Speed-dial items — anchored above the Plus button (right side) */}
+          <div className="fixed bottom-[68px] right-3 z-50 flex flex-col-reverse items-end gap-4 md:hidden">
+            {dialItems.map(({ label, icon: Icon, color, onClick, href }, i) => (
+              <div
+                key={label}
+                className="flex items-center gap-3 animate-in slide-in-from-bottom-3 fade-in duration-200"
+                style={{ animationDelay: `${i * 55}ms`, animationFillMode: 'both' }}
               >
-                <X size={18} className="text-gray-500" />
-              </button>
-            </div>
-            <div className="px-4 py-3 grid grid-cols-4 gap-2">
-              {adminMore.map(({ path, label, icon }) => (
-                <MoreItem key={path} path={path} label={label} icon={icon} onClose={() => setMoreOpen(false)} />
-              ))}
-            </div>
-            <div className="px-4 pb-4">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors min-h-[44px]"
-              >
-                <LogOut size={20} />
-                <span className="font-medium text-sm">Déconnexion</span>
-              </button>
-            </div>
+                {/* Label pill */}
+                <span className="bg-white/95 backdrop-blur-sm text-gray-800 text-sm font-medium px-3.5 py-1.5 rounded-full shadow-md whitespace-nowrap">
+                  {label}
+                </span>
+                {/* Circle button */}
+                {href ? (
+                  <Link
+                    to={href}
+                    onClick={onClick}
+                    className={`w-12 h-12 rounded-full ${color} text-white shadow-lg flex items-center justify-center shrink-0 active:scale-95 transition-transform`}
+                  >
+                    <Icon size={20} />
+                  </Link>
+                ) : (
+                  <button
+                    onClick={onClick}
+                    className={`w-12 h-12 rounded-full ${color} text-white shadow-lg flex items-center justify-center shrink-0 active:scale-95 transition-transform`}
+                  >
+                    <Icon size={20} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </>
       )}
 
-      {/* Bottom bar — always visible on mobile */}
+      {/* Bottom bar */}
       <nav
         className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 md:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
@@ -160,14 +144,18 @@ export default function BottomNav() {
             <NavTabItem key={path} path={path} label={label} icon={icon} exact={exact} />
           ))}
 
-          {/* More — admin only */}
+          {/* Plus — admin only */}
           {!isEmployee && (
             <button
               onClick={() => setMoreOpen(o => !o)}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] select-none"
             >
-              <div className={`p-1.5 rounded-xl transition-colors ${moreOpen ? 'bg-blue-100' : ''}`}>
-                <MoreHorizontal size={20} className={moreOpen ? 'text-blue-600' : 'text-gray-500'} />
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ${
+                moreOpen ? 'bg-blue-600 scale-110' : 'bg-gray-100'
+              }`}>
+                <span className={`text-lg font-bold leading-none transition-colors ${moreOpen ? 'text-white' : 'text-gray-500'}`}>
+                  ···
+                </span>
               </div>
               <span className={`text-[10px] font-medium leading-none ${moreOpen ? 'text-blue-600' : 'text-gray-500'}`}>
                 Plus

@@ -195,8 +195,8 @@ export class BoulangerParserService {
     const blocks = [
       { colOffset: 1, horaire: this.normalizeTime(this.getCellValue(timeRow, 1)) },
       { colOffset: 12, horaire: this.normalizeTime(this.getCellValue(timeRow, 12)) },
-      { colOffset: 24, horaire: this.normalizeTime(this.getCellValue(timeRow, 24)) },
-      { colOffset: 35, horaire: this.normalizeTime(this.getCellValue(timeRow, 35)) },
+      { colOffset: 23, horaire: this.normalizeTime(this.getCellValue(timeRow, 23)) },
+      { colOffset: 34, horaire: this.normalizeTime(this.getCellValue(timeRow, 34)) },
     ];
 
     this.logger.log(
@@ -275,8 +275,8 @@ export class BoulangerParserService {
     const blocks = [
       { colOffset: 1, horaire: this.normalizeTime(String(row2[1] ?? '')) },
       { colOffset: 12, horaire: this.normalizeTime(String(row2[12] ?? '')) },
-      { colOffset: 24, horaire: this.normalizeTime(String(row2[24] ?? '')) },
-      { colOffset: 35, horaire: this.normalizeTime(String(row2[35] ?? '')) },
+      { colOffset: 23, horaire: this.normalizeTime(String(row2[23] ?? '')) },
+      { colOffset: 34, horaire: this.normalizeTime(String(row2[34] ?? '')) },
     ];
 
     for (let rowNum = 4; rowNum <= 28; rowNum++) {

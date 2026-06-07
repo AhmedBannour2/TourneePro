@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   User, Lock, FileText, Upload, Download, Trash2,
   Loader2, CheckCircle, AlertCircle, Phone, MapPin, Mail, Info,
-  Link, RefreshCw, CheckCircle2, Unlink,
+  Link, RefreshCw, CheckCircle2, Unlink, FileSpreadsheet,
 } from 'lucide-react';
 import { api, API_URL } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -344,6 +345,127 @@ function MailConfigCard() {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
+
+// ── Import manuel Card ────────────────────────────────────────────────────────
+
+function ImportCard() {
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [batch, setBatch] = useState<{ id: string; rowCount: number } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [importMsg, setImportMsg] = useState({ ok: false, msg: '' });
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await api.post<{ id: string; rowCount: number }>('/imports/upload', fd, {
+        headers: { 'Content-Type': undefined },
+      });
+      return r.data;
+    },
+    onSuccess: (data) => {
+      setBatch(data);
+      setConfirmOpen(true);
+    },
+    onError: (err: any) => {
+      setImportMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur lors du chargement du fichier.' });
+    },
+  });
+
+  const commitMutation = useMutation({
+    mutationFn: async () => {
+      await api.post(`/imports/${batch!.id}/commit`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+      setConfirmOpen(false);
+      setBatch(null);
+      setImportMsg({ ok: true, msg: 'Import terminé. Les tournées ont été ajoutées.' });
+    },
+    onError: (err: any) => {
+      setConfirmOpen(false);
+      setImportMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur lors de la validation.' });
+    },
+  });
+
+  const handleFile = (file: File) => {
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      setImportMsg({ ok: false, msg: 'Seuls les fichiers .xlsx ou .xls sont acceptés.' });
+      return;
+    }
+    setImportMsg({ ok: false, msg: '' });
+    uploadMutation.mutate(file);
+  };
+
+  return (
+    <Card className="p-6 space-y-4">
+      <div className="flex items-center gap-2">
+        <FileSpreadsheet className="w-5 h-5 text-gray-500" />
+        <h2 className="font-semibold text-gray-800">Import manuel (backup)</h2>
+      </div>
+      <p className="text-xs text-gray-500">
+        Utilisez cette option si la synchronisation Google Sheets n'est pas disponible.
+      </p>
+
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          const f = e.dataTransfer.files[0];
+          if (f) handleFile(f);
+        }}
+        onClick={() => inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+        }`}
+      >
+        <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+        <p className="text-sm text-gray-600">Glisser un fichier Excel ici</p>
+        <p className="text-xs text-gray-400 mt-1">ou cliquer pour choisir (.xlsx, .xls)</p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
+        />
+      </div>
+
+      {uploadMutation.isPending && (
+        <div className="flex items-center gap-2 text-sm text-blue-600">
+          <Loader2 className="w-4 h-4 animate-spin" /> Chargement du fichier…
+        </div>
+      )}
+
+      <Feedback ok={importMsg.ok} msg={importMsg.msg} />
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmer l'import</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-700 py-2">
+            <strong>{batch?.rowCount ?? 0} tournée{(batch?.rowCount ?? 0) !== 1 ? 's' : ''}</strong> trouvée{(batch?.rowCount ?? 0) !== 1 ? 's' : ''} dans ce fichier.
+            Voulez-vous les importer ?
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setConfirmOpen(false); setBatch(null); }}>
+              Annuler
+            </Button>
+            <Button onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending}>
+              {commitMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Import…</> : 'Confirmer l\'import'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
 
 export default function Settings() {
   const { user, logout } = useAuth();
@@ -875,6 +997,9 @@ export default function Settings() {
 
           {/* Mail config */}
           <MailConfigCard />
+
+          {/* Import manuel */}
+          <ImportCard />
 
           {/* Global pay rates */}
           <Card className="p-6 space-y-4">

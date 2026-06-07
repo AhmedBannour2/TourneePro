@@ -40,7 +40,7 @@ const DialogContent = React.forwardRef<
         "fixed bottom-0 left-0 right-0 z-50 grid w-full gap-4 bg-white p-6 shadow-lg rounded-t-2xl",
         "max-h-[92vh] overflow-y-auto",
         // Desktop: centered modal
-        "md:bottom-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-lg md:rounded-lg md:max-h-none md:overflow-visible",
+        "md:bottom-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-lg md:rounded-lg md:max-h-[90vh] md:overflow-y-auto",
         // Animations
         "duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",

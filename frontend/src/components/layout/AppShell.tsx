@@ -9,17 +9,15 @@ interface AppShellProps {
 }
 
 const pageTitles: Record<string, string> = {
-  '/':                'Dashboard',
-  '/tours':           'Tournées',
-  '/import':          'Import Excel',
-  '/assignments':     "Tableau d'affectation",
-  '/express':         'Express',
-  '/employees':       'Employés',
-  '/trucks':          'Camions',
-  '/worked-days':     'Jours travaillés',
-  '/settings':        'Paramètres',
-  '/my-assignments':  'Mes tournées',
-  '/my-worked-days':  'Mes jours travaillés',
+  '/':               'Dashboard',
+  '/tours':          'Tournées',
+  '/express':        'Express',
+  '/employees':      'Employés',
+  '/trucks':         'Camions',
+  '/worked-days':    'Jours travaillés',
+  '/settings':       'Paramètres',
+  '/my-assignments': 'Mes tournées',
+  '/my-worked-days': 'Mes jours travaillés',
 };
 
 export default function AppShell({ children }: AppShellProps) {

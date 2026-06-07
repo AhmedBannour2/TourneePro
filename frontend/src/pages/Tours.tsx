@@ -603,13 +603,90 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
 
 // ─── Detail panel ─────────────────────────────────────────────────────────────
 
-function DetailPanel({ tour, onClose, onDelete, onConfirm }: {
-  tour: Tour; onClose: () => void; onDelete: () => void; onConfirm: () => void;
+function DetailPanel({ tour, onClose, onDelete, onConfirm, onRefresh }: {
+  tour: Tour; onClose: () => void; onDelete: () => void; onConfirm: () => void; onRefresh: () => void;
 }) {
+  const queryClient = useQueryClient();
   const asgn = tour.assignments?.[0];
   const confirmed = tour.confirmationStatus === 'CONFIRMED';
   const tb = typeBadge(tour.tourType);
   const isAssigned = !!asgn && (!!asgn.chauffeur || !!asgn.aide);
+
+  // Assignment state
+  const [chauffeurId, setChauffeurId] = useState(asgn?.chauffeur?.id ?? '');
+  const [aideId, setAideId] = useState(asgn?.aide?.id ?? '');
+  const [truckId, setTruckId] = useState(asgn?.truck?.id ?? '');
+  const [truckAutoFilled, setTruckAutoFilled] = useState(false);
+
+  // Employees + trucks
+  const { data: employees } = useQuery<{ id: string; name: string; role: string; isActive: boolean; responsibleTruckId: string | null }[]>({
+    queryKey: ['employees-active'],
+    queryFn: () => api.get('/employees', { params: { isActive: true } }).then(r => r.data),
+  });
+  const { data: trucks } = useQuery<{ id: string; immatriculation: string; isAvailable: boolean }[]>({
+    queryKey: ['trucks-all'],
+    queryFn: () => api.get('/trucks').then(r => r.data),
+  });
+
+  // Auto-fill truck when chauffeur is selected
+  useEffect(() => {
+    if (!chauffeurId) { setTruckAutoFilled(false); return; }
+    const emp = employees?.find(e => e.id === chauffeurId);
+    if (emp?.responsibleTruckId && !truckId) {
+      setTruckId(emp.responsibleTruckId);
+      setTruckAutoFilled(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chauffeurId, employees]);
+
+  // Assigned tours same day — for conflict warnings
+  const tourDateStr = tour.date.split('T')[0];
+  const { data: sameDayTours } = useQuery<Tour[]>({
+    queryKey: ['tours-same-day', tourDateStr],
+    queryFn: async () => {
+      const [a, b, c] = await Promise.all([
+        api.get('/tours', { params: { date: tourDateStr, status: 'assigned', limit: 100 } }),
+        api.get('/tours', { params: { date: tourDateStr, status: 'notified', limit: 100 } }),
+        api.get('/tours', { params: { date: tourDateStr, status: 'completed', limit: 100 } }),
+      ]);
+      return [...a.data.data, ...b.data.data, ...c.data.data].filter((t: Tour) => t.id !== tour.id);
+    },
+    staleTime: 30000,
+  });
+
+  const chauffeurs = employees?.filter(e => e.role === 'CHAUFFEUR' || e.role === 'BOTH') ?? [];
+  const aides = employees?.filter(e => e.role === 'AIDE' || e.role === 'BOTH') ?? [];
+
+  const chauffeurConflict = chauffeurId
+    ? sameDayTours?.some(t => t.assignments?.[0]?.chauffeur?.id === chauffeurId)
+    : false;
+  const truckConflict = truckId
+    ? sameDayTours?.some(t => t.assignments?.[0]?.truck?.id === truckId)
+    : false;
+
+  const assignMutation = useMutation({
+    mutationFn: () => api.patch(`/tours/${tour.id}/assignment`, {
+      chauffeurId: chauffeurId || undefined,
+      aideId: aideId || undefined,
+      truckId: truckId || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-same-day', tourDateStr] });
+      onRefresh();
+    },
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: () => api.delete(`/tours/${tour.id}/assignment`),
+    onSuccess: () => {
+      setChauffeurId(''); setAideId(''); setTruckId('');
+      queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+      queryClient.invalidateQueries({ queryKey: ['tours-same-day', tourDateStr] });
+      onRefresh();
+    },
+  });
 
   return (
     <div className="fixed inset-0 z-40 flex">
@@ -646,9 +723,78 @@ function DetailPanel({ tour, onClose, onDelete, onConfirm }: {
             </Badge>
           </div>
 
-          <DR label="Chauffeur" value={asgn?.chauffeur?.name} />
-          <DR label="Aide" value={asgn?.aide?.name} />
-          <DR label="Camion" value={asgn?.truck?.immatriculation} />
+          {/* ── Assignment form ──────────────────────────────────────── */}
+          <div className="border rounded-lg p-3 space-y-3 bg-gray-50">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Affectation</p>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Chauffeur</Label>
+              <select
+                value={chauffeurId}
+                onChange={e => { setChauffeurId(e.target.value); setTruckAutoFilled(false); setTruckId(''); }}
+                className="w-full border rounded-md px-3 py-1.5 text-sm bg-white"
+              >
+                <option value="">— Sélectionner —</option>
+                {chauffeurs.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+              {chauffeurConflict && (
+                <p className="text-xs text-orange-600">⚠ Déjà affecté ce jour</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Aide</Label>
+              <select
+                value={aideId}
+                onChange={e => setAideId(e.target.value)}
+                className="w-full border rounded-md px-3 py-1.5 text-sm bg-white"
+              >
+                <option value="">— Aucun —</option>
+                {aides.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs flex items-center gap-1">
+                Camion
+                {truckAutoFilled && <span className="text-[10px] text-blue-500 font-normal">🔁 auto</span>}
+              </Label>
+              <select
+                value={truckId}
+                onChange={e => { setTruckId(e.target.value); setTruckAutoFilled(false); }}
+                className="w-full border rounded-md px-3 py-1.5 text-sm bg-white"
+              >
+                <option value="">— Sélectionner —</option>
+                {trucks?.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.immatriculation}{!t.isAvailable && t.id !== asgn?.truck?.id ? ' (indispo)' : ''}
+                  </option>
+                ))}
+              </select>
+              {truckConflict && (
+                <p className="text-xs text-orange-600">⚠ Déjà utilisé ce jour</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => assignMutation.mutate()}
+                disabled={!chauffeurId || assignMutation.isPending}
+                className="flex-1 bg-blue-600 text-white text-sm rounded-lg py-2 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {assignMutation.isPending ? 'En cours…' : isAssigned ? 'Modifier' : 'Affecter'}
+              </button>
+              {isAssigned && (
+                <button
+                  onClick={() => unassignMutation.mutate()}
+                  disabled={unassignMutation.isPending}
+                  className="px-3 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors"
+                >
+                  {unassignMutation.isPending ? '…' : 'Désaffecter'}
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* Seen */}
           {asgn && (asgn.chauffeur || asgn.aide) && (
@@ -1020,6 +1166,7 @@ export default function Tours() {
           onClose={() => setDetail(null)}
           onDelete={() => setDeletingTour(detail)}
           onConfirm={() => setConfirmingTour(detail)}
+          onRefresh={() => api.get<Tour>(`/tours/${detail.id}`).then(r => setDetail(r.data)).catch(() => {})}
         />
       )}
 

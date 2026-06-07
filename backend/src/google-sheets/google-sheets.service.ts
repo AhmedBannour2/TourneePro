@@ -163,7 +163,7 @@ export class GoogleSheetsService {
           // Fetch main Alfortville sheet
           const res = await sheetsApi.spreadsheets.values.get({
             spreadsheetId: sheetId,
-            range: `'${alfortSheetName}'!A1:AK28`,
+            range: `'${alfortSheetName}'!A1:AO28`,
             valueRenderOption: 'UNFORMATTED_VALUE',
           });
           const grid: any[][] = res.data.values ?? [];
@@ -179,7 +179,7 @@ export class GoogleSheetsService {
             try {
               const resJF = await sheetsApi.spreadsheets.values.get({
                 spreadsheetId: sheetId,
-                range: `'${joursFerriesName}'!A1:AK28`,
+                range: `'${joursFerriesName}'!A1:AO28`,
                 valueRenderOption: 'UNFORMATTED_VALUE',
               });
               const gridJF: any[][] = resJF.data.values ?? [];

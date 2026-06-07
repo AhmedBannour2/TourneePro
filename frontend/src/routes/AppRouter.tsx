@@ -5,8 +5,6 @@ import AppShell from '@/components/layout/AppShell';
 import Dashboard from '@/pages/Dashboard';
 import EmployeeDashboard from '@/pages/EmployeeDashboard';
 import Tours from '@/pages/Tours';
-import Import from '@/pages/Import';
-import Assignments from '@/pages/Assignments';
 import Employees from '@/pages/Employees';
 import Trucks from '@/pages/Trucks';
 import ExpressDeliveries from '@/pages/ExpressDeliveries';
@@ -38,9 +36,6 @@ export default function AppRouter() {
                   <Routes>
                     <Route path="/" element={<RootPage />} />
                     <Route path="/tours" element={<Tours />} />
-                    <Route path="/import" element={<Import />} />
-                    <Route path="/import/:id" element={<Import />} />
-                    <Route path="/assignments" element={<Assignments />} />
                     <Route path="/express" element={<ExpressDeliveries />} />
                     <Route path="/employees" element={<Employees />} />
                     <Route path="/trucks" element={<Trucks />} />

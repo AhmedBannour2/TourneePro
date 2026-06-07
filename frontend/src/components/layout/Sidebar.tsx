@@ -3,8 +3,6 @@ import { useState } from 'react';
 import {
   LayoutDashboard,
   Truck,
-  Upload,
-  ClipboardList,
   Users,
   Calendar,
   Zap,
@@ -22,14 +20,12 @@ import { Button } from '@/components/ui/button';
 
 const adminNavItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/tours', label: 'Tours', icon: Truck },
-  { path: '/import', label: 'Import Excel', icon: Upload },
-  { path: '/assignments', label: 'Assignment Board', icon: ClipboardList },
-  { path: '/express', label: 'Express Deliveries', icon: Zap },
-  { path: '/employees', label: 'Employees', icon: Users },
-  { path: '/trucks', label: 'Trucks', icon: Car },
-  { path: '/worked-days', label: 'Worked Days', icon: Calendar },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/tours', label: 'Tournées', icon: Truck },
+  { path: '/express', label: 'Express', icon: Zap },
+  { path: '/employees', label: 'Employés', icon: Users },
+  { path: '/trucks', label: 'Camions', icon: Car },
+  { path: '/worked-days', label: 'Jours travaillés', icon: Calendar },
+  { path: '/settings', label: 'Paramètres', icon: Settings },
 ];
 
 const employeeNavItems = [

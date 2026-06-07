@@ -590,7 +590,7 @@ export default function Employees() {
 
       {/* ── Profile Side Panel ───────────────────────────────────────────────────── */}
       <Sheet open={!!panelEmployee} onOpenChange={(o) => !o && setPanelEmployee(null)}>
-        <SheetContent side="right" className="sm:max-w-xl w-full p-0 flex flex-col overflow-hidden">
+        <SheetContent side="right" className="md:max-w-md w-full p-0 flex flex-col overflow-hidden">
           {panelEmployee && (
             <>
               {/* Panel header */}
@@ -611,7 +611,7 @@ export default function Employees() {
                 </div>
               </SheetHeader>
 
-              <Tabs defaultValue="info" className="flex flex-col flex-1 overflow-hidden">
+              <Tabs defaultValue="info" className="flex flex-col flex-1 min-h-0 overflow-hidden">
                 <TabsList className="w-full rounded-none border-b bg-white shrink-0 px-0">
                   <TabsTrigger value="info" className="flex-1 rounded-none">Informations</TabsTrigger>
                   <TabsTrigger value="documents" className="flex-1 rounded-none">Documents</TabsTrigger>
@@ -621,7 +621,7 @@ export default function Employees() {
                 </TabsList>
 
                 {/* ── Info tab ──────────────────────────────────────────────────── */}
-                <TabsContent value="info" className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                <TabsContent value="info" className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
                   {/* Contact */}
                   <div className="space-y-3">
                     <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact</h3>
@@ -702,7 +702,7 @@ export default function Employees() {
                 </TabsContent>
 
                 {/* ── Documents tab ──────────────────────────────────────────────── */}
-                <TabsContent value="documents" className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                <TabsContent value="documents" className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
                   {/* Upload form */}
                   <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
                     <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -800,7 +800,7 @@ export default function Employees() {
                 </TabsContent>
 
                 {/* ── Pay rates tab ──────────────────────────────────────────── */}
-                <TabsContent value="pay-rates" className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                <TabsContent value="pay-rates" className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
                   <p className="text-xs text-gray-500">
                     Ces tarifs s'appliquent aux nouvelles tournées assignées à cet employé.
                     Les tournées existantes ne sont pas modifiées.
