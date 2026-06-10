@@ -3,6 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { join } from 'path';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -11,8 +12,17 @@ async function bootstrap() {
   // Serve uploaded files (inspection photos, documents, etc.)
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
-  // Enable CORS for local development
-  app.enableCors();
+  // Security headers
+  app.use(helmet());
+
+  // CORS — allow only known origins
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
+    .split(',')
+    .map((o) => o.trim());
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+  });
 
   // Enable global validation
   app.useGlobalPipes(
