@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 export interface InspectionRequestParams {
   to: string;
@@ -33,59 +34,68 @@ export interface AssignmentNotificationParams {
 }
 
 @Injectable()
-export class MailService implements OnModuleInit {
+export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: Transporter | null = null;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly systemConfig: SystemConfigService,
+  ) {}
 
-  onModuleInit() {
-    const host = this.config.get<string>('MAIL_HOST');
+  private async getTransporter(): Promise<Transporter | null> {
+    const db = await this.systemConfig.getMany([
+      'mail.host',
+      'mail.port',
+      'mail.user',
+      'mail.pass',
+    ]);
+
+    const host = db['mail.host'] || this.config.get<string>('MAIL_HOST');
     if (!host) {
-      this.logger.warn('MAIL_HOST not set — email notifications are disabled');
-      return;
+      this.logger.warn('No SMTP host configured — email notifications disabled');
+      return null;
     }
 
-    const port = Number(this.config.get<string>('MAIL_PORT') ?? '587');
-    this.transporter = nodemailer.createTransport({
+    const port = Number(db['mail.port'] || this.config.get<string>('MAIL_PORT') || '465');
+    const user = db['mail.user'] || this.config.get<string>('MAIL_USER');
+    const pass = db['mail.pass'] || this.config.get<string>('MAIL_PASS');
+
+    this.logger.debug(`SMTP: ${host}:${port} (${db['mail.host'] ? 'DB' : 'env'})`);
+
+    return nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
-      auth: {
-        user: this.config.get<string>('MAIL_USER'),
-        pass: this.config.get<string>('MAIL_PASS'),
-      },
+      auth: { user, pass },
     });
+  }
 
-    this.logger.log(`SMTP configured: ${host}:${port}`);
+  private async getFrom(): Promise<string> {
+    const dbFrom = await this.systemConfig.get('mail.from');
+    return dbFrom || this.config.get<string>('MAIL_FROM') || 'noreply@tournee.pro';
   }
 
   async sendAssignmentNotification(params: AssignmentNotificationParams): Promise<void> {
-    if (!this.transporter) {
+    const transporter = await this.getTransporter();
+    if (!transporter) {
       this.logger.debug('Email skipped — SMTP not configured');
       return;
     }
 
-    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
-
+    const from = await this.getFrom();
     const subject = `Tournée ${params.tourCode} assignée — ${this.formatDate(params.tourDate)}`;
 
-    await this.transporter.sendMail({
-      from,
-      to: params.to,
-      subject,
-      html: this.buildHtml(params),
-    });
-
+    await transporter.sendMail({ from, to: params.to, subject, html: this.buildHtml(params) });
     this.logger.log(`Assignment email sent to ${params.to} (tour ${params.tourCode})`);
   }
 
   async sendInspectionRequestEmail(params: InspectionRequestParams): Promise<void> {
-    if (!this.transporter) return;
-    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    const transporter = await this.getTransporter();
+    if (!transporter) return;
+    const from = await this.getFrom();
     const firstName = params.employeeName.split(' ')[0];
     const dateStr = this.formatDate(params.scheduledDate);
-    await this.transporter.sendMail({
+    await transporter.sendMail({
       from,
       to: params.to,
       subject: `Contrôle à effectuer — ${params.truckImmatriculation} — ${dateStr}`,
@@ -114,8 +124,9 @@ export class MailService implements OnModuleInit {
   }
 
   async sendInspectionProblemEmail(params: InspectionProblemParams): Promise<void> {
-    if (!this.transporter) return;
-    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
+    const transporter = await this.getTransporter();
+    if (!transporter) return;
+    const from = await this.getFrom();
     const dateStr = this.formatDate(params.scheduledDate);
     const itemLabels: Record<string, string> = {
       HUILE: "Niveau d'huile",
@@ -132,7 +143,7 @@ export class MailService implements OnModuleInit {
           `<td style="padding:8px 0 8px 16px;color:#374151;">${i.comment ?? '—'}</td></tr>`,
       )
       .join('');
-    await this.transporter.sendMail({
+    await transporter.sendMail({
       from,
       to: params.to,
       subject: `⚠️ Problème signalé — ${params.truckImmatriculation} — ${dateStr}`,
@@ -156,17 +167,13 @@ export class MailService implements OnModuleInit {
   }
 
   async sendRaw(params: { to: string; subject: string; text: string }): Promise<void> {
-    if (!this.transporter) {
+    const transporter = await this.getTransporter();
+    if (!transporter) {
       this.logger.debug('Email skipped — SMTP not configured');
       return;
     }
-    const from = this.config.get<string>('MAIL_FROM') ?? 'noreply@tourneepro.fr';
-    await this.transporter.sendMail({
-      from,
-      to: params.to,
-      subject: params.subject,
-      text: params.text,
-    });
+    const from = await this.getFrom();
+    await transporter.sendMail({ from, to: params.to, subject: params.subject, text: params.text });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
