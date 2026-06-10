@@ -167,7 +167,7 @@ const emptyRepair = { date: new Date().toISOString().split('T')[0], type: 'REPAI
 export default function Trucks() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { toasts, removeToast, success, error: showError } = useToast();
+  const { toasts, removeToast, success } = useToast();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'DISPATCHER';
 
   // Truck CRUD state
@@ -185,7 +185,6 @@ export default function Trucks() {
   const [expandedInspection, setExpandedInspection] = useState<string | null>(null);
   const [requestingInspection, setRequestingInspection] = useState(false);
   const [inspectionError, setInspectionError] = useState('');
-  const [, setRequestingInspectionForTruckId] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Panel tab state
