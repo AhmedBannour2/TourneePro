@@ -2,12 +2,12 @@
   "redirects": [
     {
       "source": "/api-proxy/auth/google",
-      "destination": "https://tourneepro-production.up.railway.app/auth/google",
+      "destination": "https://api.tournee.pro/auth/google",
       "permanent": false
     }
   ],
   "rewrites": [
-    { "source": "/api-proxy/:path*", "destination": "https://tourneepro-production.up.railway.app/:path*" },
+    { "source": "/api-proxy/:path*", "destination": "https://api.tournee.pro/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
