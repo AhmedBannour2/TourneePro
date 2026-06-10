@@ -1,0 +1,295 @@
+{
+  "employees": [
+    {
+      "id": "78a1c325-4b44-4c27-9fa1-a0946dac6f39",
+      "name": "Ahemd bannour",
+      "firstName": null,
+      "lastName": null,
+      "phone": "+330745631430",
+      "role": "CHAUFFEUR",
+      "address": null,
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "33be478d-3df8-4053-9fb0-69f9e2f91dd9",
+      "name": "Salim stp",
+      "firstName": "Salim",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "a4fa0a23-90c2-481f-ad03-e88de437cbc3"
+    },
+    {
+      "id": "10d93c60-403e-4133-be42-971edfded458",
+      "name": "abdel stp",
+      "firstName": "abdel",
+      "lastName": "stp",
+      "phone": "",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "2aa6d1e0-10cf-4c89-9491-43f79168c48b",
+      "name": "adem benyalaa",
+      "firstName": "adem",
+      "lastName": "benyalaa",
+      "phone": "+330744575095",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "81e4377e-a7a5-49b4-9ef5-0ae4b427b200",
+      "name": "alaa stp",
+      "firstName": "alaa",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "6291970d-3236-42ef-adfe-73870f0578c3"
+    },
+    {
+      "id": "4c20f800-05e3-40a7-ba27-c6d83d663c10",
+      "name": "bilel stp",
+      "firstName": "bilel",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "4d564a1e-3af2-4d30-bded-c963e9dccbd4"
+    },
+    {
+      "id": "acfe1ce0-b85f-464a-9bcc-b8b029fc2030",
+      "name": "fathi stp",
+      "firstName": "fathi",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "ac6e6bf7-5f18-4d82-8a44-a002fdc07390"
+    },
+    {
+      "id": "0dedbe6b-69ea-409e-a55b-e0387ce22259",
+      "name": "ilyass stp",
+      "firstName": "ilyass",
+      "lastName": "stp",
+      "phone": "",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "caab1018-6c31-418a-a0f5-4f70b339a5e5",
+      "name": "karim",
+      "firstName": null,
+      "lastName": null,
+      "phone": "+33749563351",
+      "role": "AIDE",
+      "address": null,
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "0afc8c2a-e1a5-4d60-9788-801ef41960fa",
+      "name": "khaled ch",
+      "firstName": "khaled",
+      "lastName": "ch",
+      "phone": "+33 619256768",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "0335e81c-6b72-4c61-9241-0fb2f89ca7b5"
+    },
+    {
+      "id": "85ea7d6d-4fff-4863-b002-507dcde53d04",
+      "name": "khaled gherwel",
+      "firstName": "khaled",
+      "lastName": "gherwel",
+      "phone": "+330766890594",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "834761e3-870e-4d8f-b619-7c77ca16bbb9",
+      "name": "lassaad stp",
+      "firstName": "lassaad",
+      "lastName": "stp",
+      "phone": "",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "e455fa8e-de9f-4a86-b73c-52feb4bd6b3a",
+      "name": "maher stp",
+      "firstName": "maher",
+      "lastName": "stp",
+      "phone": "",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    },
+    {
+      "id": "ae9f0482-4c04-48ef-abc6-bef3c0e14150",
+      "name": "moncef",
+      "firstName": null,
+      "lastName": null,
+      "phone": "+33746349598",
+      "role": "CHAUFFEUR",
+      "address": null,
+      "isActive": true,
+      "responsibleTruckId": "df326a4a-38f5-4a45-8af3-c25a768f8e19"
+    },
+    {
+      "id": "40f6a66a-95fe-49bb-8f4c-307a90f72d27",
+      "name": "morad stp",
+      "firstName": "morad",
+      "lastName": "stp",
+      "phone": "+33768591215",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "7c859745-59ef-4862-a4b9-68470842e228"
+    },
+    {
+      "id": "b13c8691-c5f6-441f-a6c5-058e6b394931",
+      "name": "skander stp",
+      "firstName": "skander",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "505345bb-6813-4ffc-8b0b-016ace0b6144"
+    },
+    {
+      "id": "1b3f4bbd-11d4-4038-a2ac-3fc0351f26de",
+      "name": "wajdi hadj masoud",
+      "firstName": "wajdi",
+      "lastName": "hadj masoud",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "44dd189e-da5d-45ae-9a14-3206a42c5be1"
+    },
+    {
+      "id": "0eb39e7f-d8e7-41a1-8326-3d1098c68859",
+      "name": "walid stp",
+      "firstName": "walid",
+      "lastName": "stp",
+      "phone": "",
+      "role": "CHAUFFEUR",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": "fc5a18e5-e9a1-4c77-bdbe-7713e1b3b973"
+    },
+    {
+      "id": "7225cf59-7640-47d0-91a2-391fee9d4914",
+      "name": "yassine zenkri",
+      "firstName": "yassine",
+      "lastName": "zenkri",
+      "phone": "+337553764432",
+      "role": "AIDE",
+      "address": "",
+      "isActive": true,
+      "responsibleTruckId": null
+    }
+  ],
+  "trucks": [
+    {
+      "id": "4d564a1e-3af2-4d30-bded-c963e9dccbd4",
+      "immatriculation": "DG-398-MR",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "4c20f800-05e3-40a7-ba27-c6d83d663c10"
+    },
+    {
+      "id": "a4fa0a23-90c2-481f-ad03-e88de437cbc3",
+      "immatriculation": "DL-727-VP",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "33be478d-3df8-4053-9fb0-69f9e2f91dd9"
+    },
+    {
+      "id": "44dd189e-da5d-45ae-9a14-3206a42c5be1",
+      "immatriculation": "DM-127-AH",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "1b3f4bbd-11d4-4038-a2ac-3fc0351f26de"
+    },
+    {
+      "id": "7c859745-59ef-4862-a4b9-68470842e228",
+      "immatriculation": "EA-592-KN",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "40f6a66a-95fe-49bb-8f4c-307a90f72d27"
+    },
+    {
+      "id": "0335e81c-6b72-4c61-9241-0fb2f89ca7b5",
+      "immatriculation": "EF-021-TG",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "0afc8c2a-e1a5-4d60-9788-801ef41960fa"
+    },
+    {
+      "id": "505345bb-6813-4ffc-8b0b-016ace0b6144",
+      "immatriculation": "EF-630-WF",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "b13c8691-c5f6-441f-a6c5-058e6b394931"
+    },
+    {
+      "id": "6291970d-3236-42ef-adfe-73870f0578c3",
+      "immatriculation": "FB-283-FQ",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "81e4377e-a7a5-49b4-9ef5-0ae4b427b200"
+    },
+    {
+      "id": "df326a4a-38f5-4a45-8af3-c25a768f8e19",
+      "immatriculation": "FG-483-XK",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "ae9f0482-4c04-48ef-abc6-bef3c0e14150"
+    },
+    {
+      "id": "ac6e6bf7-5f18-4d82-8a44-a002fdc07390",
+      "immatriculation": "FH-839-FB",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "acfe1ce0-b85f-464a-9bcc-b8b029fc2030"
+    },
+    {
+      "id": "fc5a18e5-e9a1-4c77-bdbe-7713e1b3b973",
+      "immatriculation": "FL-688-NB",
+      "isAvailable": true,
+      "status": "available",
+      "notes": null,
+      "responsibleEmployeeId": "0eb39e7f-d8e7-41a1-8326-3d1098c68859"
+    }
+  ]
+}
