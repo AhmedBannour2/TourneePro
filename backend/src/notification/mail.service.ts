@@ -34,7 +34,7 @@ export interface AssignmentNotificationParams {
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
+  private readonly RESEND_URL = 'https://api.resend.com/emails';
 
   constructor(
     private readonly config: ConfigService,
@@ -42,45 +42,43 @@ export class MailService {
   ) {}
 
   private async getApiKey(): Promise<string | null> {
-    const dbKey = await this.systemConfig.get('brevo.api_key');
-    return dbKey || this.config.get<string>('BREVO_API_KEY') || null;
+    const dbKey = await this.systemConfig.get('resend.api_key');
+    return dbKey || this.config.get<string>('RESEND_API_KEY') || null;
   }
 
   private async getFrom(): Promise<string> {
     const dbFrom = await this.systemConfig.get('mail.from');
-    return dbFrom || this.config.get<string>('MAIL_FROM') || 'noreply@tournee.pro';
+    return dbFrom || this.config.get<string>('MAIL_FROM') || 'TourneePro <noreply@tournee.pro>';
   }
 
   private async send(params: {
     to: string;
     subject: string;
-    textContent?: string;
-    htmlContent?: string;
+    text?: string;
+    html?: string;
   }): Promise<void> {
     const apiKey = await this.getApiKey();
     if (!apiKey) {
-      this.logger.warn('BREVO_API_KEY not set — email notifications disabled');
+      this.logger.warn('RESEND_API_KEY not set — email notifications disabled');
       return;
     }
 
-    const fromAddress = await this.getFrom();
-    const senderName = fromAddress.match(/^(.+?)\s*</)?.[1]?.trim() ?? 'TourneePro';
-    const senderEmail = fromAddress.match(/<(.+?)>/)?.[1] ?? fromAddress;
+    const from = await this.getFrom();
 
     const body = {
-      sender: { name: senderName, email: senderEmail },
-      to: [{ email: params.to }],
+      from,
+      to: [params.to],
       subject: params.subject,
-      ...(params.htmlContent ? { htmlContent: params.htmlContent } : {}),
-      ...(params.textContent ? { textContent: params.textContent } : {}),
+      ...(params.html ? { html: params.html } : {}),
+      ...(params.text ? { text: params.text } : {}),
     };
 
-    this.logger.debug(`Brevo API → ${params.to} — ${params.subject}`);
+    this.logger.debug(`Resend API → ${params.to} — ${params.subject}`);
 
-    const res = await fetch(this.BREVO_URL, {
+    const res = await fetch(this.RESEND_URL, {
       method: 'POST',
       headers: {
-        'api-key': apiKey,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
@@ -89,7 +87,7 @@ export class MailService {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Brevo API ${res.status}: ${text}`);
+      throw new Error(`Resend API ${res.status}: ${text}`);
     }
 
     this.logger.log(`Email sent to ${params.to} (${params.subject})`);
@@ -99,7 +97,7 @@ export class MailService {
     await this.send({
       to: params.to,
       subject: `Tournée ${params.tourCode} assignée — ${this.formatDate(params.tourDate)}`,
-      htmlContent: this.buildHtml(params),
+      html: this.buildHtml(params),
     });
   }
 
@@ -109,7 +107,7 @@ export class MailService {
     await this.send({
       to: params.to,
       subject: `Contrôle à effectuer — ${params.truckImmatriculation} — ${dateStr}`,
-      htmlContent: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
         <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
           <div style="background:#1d4ed8;padding:24px 32px;">
             <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">🚚 TourneePro</p>
@@ -150,7 +148,7 @@ export class MailService {
     await this.send({
       to: params.to,
       subject: `⚠️ Problème signalé — ${params.truckImmatriculation} — ${dateStr}`,
-      htmlContent: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
         <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
           <div style="background:#dc2626;padding:24px 32px;">
             <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">⚠️ TourneePro — Problème signalé</p>
@@ -167,7 +165,7 @@ export class MailService {
   }
 
   async sendRaw(params: { to: string; subject: string; text: string }): Promise<void> {
-    await this.send({ to: params.to, subject: params.subject, textContent: params.text });
+    await this.send({ to: params.to, subject: params.subject, text: params.text });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
