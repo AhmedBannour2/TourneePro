@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Truck,
   Users,
@@ -202,6 +203,7 @@ function UpcomingCard({ item }: { item: AssignmentItem }) {
 }
 
 export default function EmployeeDashboard() {
+  usePageTitle('Mon espace');
   const { user } = useAuth();
 
   const { data, isLoading, isError } = useQuery({

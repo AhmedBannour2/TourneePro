@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
   Truck as TruckIcon, History, Wrench, Loader2,
@@ -165,6 +166,7 @@ const emptyRepair = { date: new Date().toISOString().split('T')[0], type: 'REPAI
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function Trucks() {
+  usePageTitle('Camions');
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { toasts, removeToast, success } = useToast();

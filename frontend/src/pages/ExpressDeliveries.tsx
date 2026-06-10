@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Plus, Zap, Users, Camera, X, ChevronDown,
   CheckCircle2, Loader2, Upload, Eye, UserCheck, AlertCircle,
@@ -636,6 +637,7 @@ function ExpressCard({ delivery, onView }: { delivery: ExpressDelivery; onView: 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function ExpressDeliveries() {
+  usePageTitle('Livraisons express');
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [panelDelivery, setPanelDelivery] = useState<ExpressDelivery | null>(null);

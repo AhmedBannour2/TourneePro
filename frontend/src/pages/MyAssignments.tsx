@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Calendar, Truck, Users, Clock, Phone,
   CheckCircle2, ClipboardCheck, History, Zap, Camera,
@@ -662,6 +663,7 @@ function InspectionModal({ inspection, onClose, onSubmitted }: {
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function MyAssignments() {
+  usePageTitle('Mes tournées');
   const queryClient = useQueryClient();
   const [confirmingTour, setConfirmingTour]       = useState<TourItem | null>(null);
   const [confirmingExpress, setConfirmingExpress] = useState<ExpressItem | null>(null);

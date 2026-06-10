@@ -133,6 +133,15 @@ export class EmployeesController {
     return this.employeesService.remove(id);
   }
 
+  @Delete(':id/hard')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Permanently delete employee (admin only)' })
+  @ApiParam({ name: 'id', description: 'Employee UUID' })
+  hardDelete(@Param('id') id: string) {
+    return this.employeesService.hardDelete(id);
+  }
+
   // ── Account ────────────────────────────────────────────────────────────────
 
   @Post(':id/create-account')

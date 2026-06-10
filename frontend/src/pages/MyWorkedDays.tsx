@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Lock, Zap, Check, X } from 'lucide-react';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -245,6 +246,7 @@ function CalendarCell({ wd, day, isToday, onClick }: {
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function MyWorkedDays() {
+  usePageTitle('Mes jours travaillés');
   const { user } = useAuth();
   const queryClient = useQueryClient();
 

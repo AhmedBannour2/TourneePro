@@ -6,6 +6,7 @@ import {
   SlidersHorizontal, Pencil,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1113,6 +1114,7 @@ type TabType = 'active' | 'history';
 const MONTH_NAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 export default function Tours() {
+  usePageTitle('Tournées');
   const queryClient = useQueryClient();
   const { success: showSuccess, toasts, removeToast } = useToast();
 

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
@@ -468,6 +469,7 @@ function ImportCard() {
 }
 
 export default function Settings() {
+  usePageTitle('Paramètres');
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const isEmployee = user?.role === 'EMPLOYEE';

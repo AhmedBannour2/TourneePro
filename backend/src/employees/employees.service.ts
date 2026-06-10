@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { unlinkSync } from 'fs';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -85,6 +90,27 @@ export class EmployeesService {
       data: { isActive: false },
       include: WITH_USER,
     });
+  }
+
+  async hardDelete(id: string) {
+    const employee = await this.findOne(id);
+
+    const futureAssignment = await this.prisma.assignment.findFirst({
+      where: {
+        OR: [{ chauffeurId: id }, { aideId: id }],
+        tour: { date: { gte: new Date() } },
+      },
+    });
+    if (futureAssignment) {
+      throw new BadRequestException("Cet employé a des tournées à venir. Désaffectez-le d'abord.");
+    }
+
+    if (employee.userId) {
+      await this.prisma.user.delete({ where: { id: employee.userId } });
+    }
+
+    await this.prisma.employee.delete({ where: { id } });
+    return { deleted: true };
   }
 
   // ── Account management ─────────────────────────────────────────────────────

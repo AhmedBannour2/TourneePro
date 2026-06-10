@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { Truck, AlertCircle, Users, Upload } from 'lucide-react';
 
 interface DashboardStats {
@@ -11,6 +12,7 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
+  usePageTitle('Tableau de bord');
   const { data: stats, isLoading, isError } = useQuery<DashboardStats>({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {

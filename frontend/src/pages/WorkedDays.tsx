@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronLeft, ChevronRight, Lock, Pencil, Zap, X, Plus, Check, Ban, Users,
 } from 'lucide-react';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -335,6 +336,7 @@ function AdminWdPanel({
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function WorkedDays() {
+  usePageTitle('Jours travaillés');
   const queryClient = useQueryClient();
   const { toasts, removeToast } = useToast();
 

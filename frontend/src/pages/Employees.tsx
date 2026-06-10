@@ -8,6 +8,7 @@ import {
   Phone, MapPin, Calendar, Truck as TruckIcon, Search,
   Upload, Download, Trash2, FileText, Loader2, User, DollarSign,
 } from 'lucide-react';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -122,6 +123,7 @@ type EditAccountFormData = z.infer<typeof editAccountSchema>;
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function Employees() {
+  usePageTitle('Employés');
   const queryClient = useQueryClient();
   const { toasts, removeToast, success, error } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +144,9 @@ export default function Employees() {
 
   // Profile panel
   const [panelEmployee, setPanelEmployee] = useState<Employee | null>(null);
+
+  // Delete confirm
+  const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
 
   // Document upload state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -259,6 +264,17 @@ export default function Employees() {
       setAccountEmployee(null);
     },
     onError: (err: any) => error(err.response?.data?.message || 'Erreur création compte'),
+  });
+
+  const hardDeleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/employees/${id}/hard`),
+    onSuccess: () => {
+      success('Employé supprimé');
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setDeletingEmployee(null);
+      if (panelEmployee?.id === deletingEmployee?.id) setPanelEmployee(null);
+    },
+    onError: (err: any) => error(err.response?.data?.message || 'Erreur suppression'),
   });
 
   const updateAccountMutation = useMutation({
@@ -483,6 +499,9 @@ export default function Employees() {
                       {emp.userId
                         ? <Button variant="ghost" size="sm" title="Modifier le compte" onClick={() => openEditAccountDialog(emp)}><Pencil className="w-4 h-4 text-indigo-600" /></Button>
                         : <Button variant="ghost" size="sm" onClick={() => openAccountDialog(emp)}><KeyRound className="w-4 h-4 text-indigo-600" /></Button>}
+                      <Button variant="ghost" size="sm" title="Supprimer" onClick={() => setDeletingEmployee(emp)}>
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -588,6 +607,37 @@ export default function Employees() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirmation Dialog ──────────────────────────────────────────── */}
+      <Dialog open={!!deletingEmployee} onOpenChange={(o) => { if (!o) setDeletingEmployee(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="w-4 h-4" /> Supprimer l'employé
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-2">
+            <p className="text-sm text-gray-700">
+              Supprimer définitivement <strong>{deletingEmployee?.name}</strong> ?
+            </p>
+            <p className="text-xs text-red-600">
+              Cette action est irréversible. Le compte applicatif sera également supprimé.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingEmployee(null)}>Annuler</Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={hardDeleteMutation.isPending}
+              onClick={() => deletingEmployee && hardDeleteMutation.mutate(deletingEmployee.id)}
+            >
+              {hardDeleteMutation.isPending
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Suppression...</>
+                : 'Supprimer définitivement'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -767,10 +817,14 @@ export default function Employees() {
                     </div>
                   </div>
 
-                  {/* Edit button */}
-                  <div className="border-t pt-4">
+                  {/* Edit / Delete buttons */}
+                  <div className="border-t pt-4 space-y-2">
                     <Button variant="outline" className="w-full" onClick={() => openEdit(panelEmployee)}>
                       <Pencil className="w-4 h-4 mr-2" /> Modifier les informations
+                    </Button>
+                    <Button variant="outline" className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => setDeletingEmployee(panelEmployee)}>
+                      <Trash2 className="w-4 h-4 mr-2" /> Supprimer l'employé
                     </Button>
                   </div>
                 </TabsContent>
