@@ -538,7 +538,6 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
   const [open, setOpen] = useState(defaultExpanded);
 
   const assigned  = tours.filter(t => t.status !== 'imported' && t.status !== 'cancelled').length;
-  const confirmed = tours.filter(t => t.confirmationStatus === 'CONFIRMED').length;
 
   const label = new Date(dateKey + 'T12:00:00').toLocaleDateString('fr-FR', {
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',

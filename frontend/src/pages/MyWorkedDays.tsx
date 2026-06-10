@@ -6,7 +6,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToastContainer } from '@/components/ui/toast';
 import { useToast } from '@/hooks/useToast';
@@ -288,7 +287,6 @@ export default function MyWorkedDays() {
   }, [workedDays]);
 
   // Today for highlighting
-  const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const isToday = (d: number) =>
     year === now.getUTCFullYear() && month - 1 === now.getUTCMonth() && d === now.getUTCDate();
 

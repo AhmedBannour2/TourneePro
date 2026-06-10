@@ -272,7 +272,7 @@ function MailConfigCard() {
   const [pass, setPass] = useState('');
   const [from, setFrom] = useState('');
   const [msg, setMsg] = useState({ ok: false, msg: '' });
-  const [testMsg, setTestMsg] = useState({ ok: false, msg: '' });
+  const [testMsg] = useState({ ok: false, msg: '' });
 
   useQuery({
     queryKey: ['mail-config'],
@@ -513,7 +513,6 @@ export default function Settings() {
   const {
     register: regEmail,
     handleSubmit: handleEmail,
-    reset: resetEmail,
     formState: { errors: emailErrors, isSubmitting: emailLoading },
   } = useForm<EmailForm>({ resolver: zodResolver(emailSchema) });
 

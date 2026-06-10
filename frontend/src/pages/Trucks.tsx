@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -185,7 +185,7 @@ export default function Trucks() {
   const [expandedInspection, setExpandedInspection] = useState<string | null>(null);
   const [requestingInspection, setRequestingInspection] = useState(false);
   const [inspectionError, setInspectionError] = useState('');
-  const [requestingInspectionForTruckId, setRequestingInspectionForTruckId] = useState<string | null>(null);
+  const [, setRequestingInspectionForTruckId] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   // Panel tab state
@@ -291,7 +291,7 @@ export default function Trucks() {
     onError: (err: any) => alert(err?.response?.data?.message || 'Erreur validation'),
   });
 
-  const { data: truckDocuments, isLoading: docsLoading } = useQuery<TruckDocument[]>({
+  const { data: truckDocuments } = useQuery<TruckDocument[]>({
     queryKey: ['truck-documents', historyTruckId],
     queryFn: async () => (await api.get<TruckDocument[]>(`/trucks/${historyTruckId}/documents`)).data,
     enabled: !!historyTruckId,
@@ -387,22 +387,6 @@ export default function Trucks() {
       setInspectionError(err?.response?.data?.message || 'Erreur lors de la demande de contrôle.');
     } finally {
       setRequestingInspection(false);
-    }
-  };
-
-  const requestInspectionFromRow = async (truck: Truck) => {
-    if (!truck.responsibleEmployee) {
-      showError("Aucun chauffeur responsable assigné à ce camion.");
-      return;
-    }
-    setRequestingInspectionForTruckId(truck.id);
-    try {
-      await api.post(`/trucks/${truck.id}/inspections`, {});
-      success(`Contrôle demandé — ${truck.responsibleEmployee.name} a été notifié`);
-    } catch (err: any) {
-      showError(err?.response?.data?.message || 'Erreur lors de la demande de contrôle.');
-    } finally {
-      setRequestingInspectionForTruckId(null);
     }
   };
 

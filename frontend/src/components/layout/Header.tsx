@@ -9,7 +9,7 @@ export default function Header({ title }: HeaderProps) {
   const { user } = useAuth();
   const initials = (user?.name || user?.email || '?')
     .split(' ')
-    .map((n) => n[0])
+    .map((n: string) => n[0])
     .join('')
     .toUpperCase()
     .slice(0, 2);

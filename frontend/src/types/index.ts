@@ -2,14 +2,15 @@
 export interface User {
   id: string;
   email: string;
-  role: 'ADMIN' | 'MANAGER' | 'DISPATCHER' | 'EMPLOYEE';
+  name?: string;
+  role: "ADMIN" | "MANAGER" | "DISPATCHER" | "EMPLOYEE";
 }
 
 // Employee types
 export interface Employee {
   id: string;
   name: string;
-  role: 'chauffeur-livreur' | 'aide-livreur';
+  role: "chauffeur-livreur" | "aide-livreur";
   isAvailable: boolean;
   phoneNumber?: string;
 }
@@ -24,8 +25,14 @@ export interface Truck {
 }
 
 // Tour types
-export type TourStatus = 'imported' | 'assigned' | 'notified' | 'completed' | 'conflict' | 'cancelled';
-export type TourType = 'standard' | 'express' | 'manual';
+export type TourStatus =
+  | "imported"
+  | "assigned"
+  | "notified"
+  | "completed"
+  | "conflict"
+  | "cancelled";
+export type TourType = "standard" | "express" | "manual";
 
 export interface Tour {
   id: string;
@@ -43,7 +50,12 @@ export interface Tour {
 }
 
 // Import types
-export type ImportStatus = 'pending' | 'processing' | 'preview' | 'committed' | 'failed';
+export type ImportStatus =
+  | "pending"
+  | "processing"
+  | "preview"
+  | "committed"
+  | "failed";
 
 export interface ImportBatch {
   id: string;
@@ -101,7 +113,7 @@ export interface QualityNote {
   date: string;
   score: number;
   comments?: string;
-  source: 'boulanger' | 'internal';
+  source: "boulanger" | "internal";
 }
 
 // Assignment types
