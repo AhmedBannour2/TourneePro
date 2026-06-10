@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { google } from 'googleapis';
+import { randomBytes } from 'crypto';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { BoulangerParserService } from '../imports/parsers/boulanger-parser.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -48,9 +49,11 @@ export class GoogleSheetsService {
 
   getAuthUrl(): string {
     const client = this.createOAuthClient();
+    const state = randomBytes(16).toString('hex');
     return client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
+      state,
       scope: [
         'https://www.googleapis.com/auth/spreadsheets.readonly',
         'https://www.googleapis.com/auth/userinfo.email',
