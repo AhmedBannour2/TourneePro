@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ConfirmationStatus, WorkedDayStatus, TourSource } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { CreateTourDto } from './dto/create-tour.dto';
+import { UpdateTourDto } from './dto/update-tour.dto';
 
 @Injectable()
 export class ToursService {
@@ -140,6 +141,28 @@ export class ToursService {
     }
 
     return tour;
+  }
+
+  async updateTour(id: string, dto: UpdateTourDto) {
+    await this.findOne(id);
+
+    const data: any = {};
+    if (dto.tourCode !== undefined) data.tourCode = dto.tourCode;
+    if (dto.date !== undefined) data.date = new Date(dto.date);
+    if (dto.platformId !== undefined) data.platformId = dto.platformId;
+    if (dto.quai !== undefined) data.quai = dto.quai || null;
+    if (dto.horaire !== undefined) data.horaire = dto.horaire || null;
+    if (dto.tourType !== undefined) data.tourType = dto.tourType || null;
+
+    return this.prisma.tour.update({
+      where: { id },
+      data,
+      include: {
+        platform: true,
+        assignments: { include: { chauffeur: true, aide: true, truck: true } },
+        confirmation: { include: { confirmedBy: { select: { id: true, name: true } } } },
+      },
+    });
   }
 
   async assignTour(id: string, assignDto: AssignTourDto, userId?: string) {

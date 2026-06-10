@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
   ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck, RefreshCw,
-  SlidersHorizontal,
+  SlidersHorizontal, Pencil,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
@@ -122,10 +122,168 @@ function detectTypeStr(code: string): string {
 const FILTER_SEL =
   'h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 w-full';
 
+const PRESET_TYPES = ['Standard', 'GV', 'Install', 'Mono', 'Spéciale'];
+
+// ─── Shared tour form fields ───────────────────────────────────────────────────
+
+function TourFormFields({
+  code, setCode, date, setDate,
+  platId, setPlatId, platforms, onPlatformCreated,
+  quai, setQuai, horaire, setHoraire,
+  typeStr, setTypeStr,
+  showAutoType,
+}: {
+  code: string; setCode: (v: string) => void;
+  date: string; setDate: (v: string) => void;
+  platId: string; setPlatId: (v: string) => void;
+  platforms: Platform[]; onPlatformCreated: (p: Platform) => void;
+  quai: string; setQuai: (v: string) => void;
+  horaire: string; setHoraire: (v: string) => void;
+  typeStr: string; setTypeStr: (v: string) => void;
+  showAutoType?: boolean;
+}) {
+  const [newPlat, setNewPlat]         = useState(false);
+  const [platName, setPlatName]       = useState('');
+  const [platCode, setPlatCode]       = useState('');
+  const [creatingPlat, setCreatingPlat] = useState(false);
+  const [platError, setPlatError]     = useState('');
+
+  const [customType, setCustomType]   = useState(false);
+  const [customTypeVal, setCustomTypeVal] = useState('');
+
+  const isCustomType = !PRESET_TYPES.includes(typeStr);
+
+  const createPlatform = async () => {
+    if (!platName.trim() || !platCode.trim()) return;
+    setCreatingPlat(true); setPlatError('');
+    try {
+      const { data } = await api.post<Platform>('/platforms', { name: platName.trim(), code: platCode.trim() });
+      onPlatformCreated(data);
+      setPlatId(data.id);
+      setNewPlat(false); setPlatName(''); setPlatCode('');
+    } catch (e: any) {
+      setPlatError(e.response?.data?.message || 'Erreur création plateforme');
+    } finally {
+      setCreatingPlat(false);
+    }
+  };
+
+  const handleTypeChange = (v: string) => {
+    if (v === '__custom__') { setCustomType(true); setTypeStr(customTypeVal || ''); }
+    else { setCustomType(false); setTypeStr(v); }
+  };
+
+  const handleCustomTypeInput = (v: string) => {
+    setCustomTypeVal(v); setTypeStr(v);
+  };
+
+  const autoType = code ? detectTypeStr(code) : 'Standard';
+
+  return (
+    <div className="space-y-4 py-2">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Code tournée <span className="text-red-500">*</span></Label>
+          <Input
+            type="text" placeholder="ex: 804"
+            value={code} onChange={e => { setCode(e.target.value); if (!customType) setTypeStr(detectTypeStr(e.target.value)); }}
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label>Date <span className="text-red-500">*</span></Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1" />
+        </div>
+      </div>
+
+      {/* Platform */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <Label>Plateforme <span className="text-red-500">*</span></Label>
+          {!newPlat && (
+            <button type="button" onClick={() => setNewPlat(true)}
+              className="text-xs text-blue-600 hover:underline flex items-center gap-0.5">
+              <Plus size={11} /> Nouvelle
+            </button>
+          )}
+        </div>
+        {newPlat ? (
+          <div className="border border-blue-200 rounded-lg p-3 bg-blue-50 space-y-2">
+            <p className="text-xs font-medium text-blue-700">Nouvelle plateforme</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="Nom (ex: Alfortville)" value={platName} onChange={e => setPlatName(e.target.value)} className="bg-white" />
+              <Input placeholder="Code (ex: F166)" value={platCode} onChange={e => setPlatCode(e.target.value)} className="bg-white" />
+            </div>
+            {platError && <p className="text-xs text-red-600">{platError}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={createPlatform} disabled={!platName.trim() || !platCode.trim() || creatingPlat} className="h-7 text-xs">
+                {creatingPlat ? <Loader2 size={12} className="animate-spin" /> : 'Créer'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setNewPlat(false); setPlatName(''); setPlatCode(''); setPlatError(''); }} className="h-7 text-xs">
+                Annuler
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <select value={platId} onChange={e => setPlatId(e.target.value)} className={`mt-1 ${FILTER_SEL}`}>
+            <option value="">— Sélectionner —</option>
+            {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Quai</Label>
+          <Input placeholder="ex: 54" value={quai} onChange={e => setQuai(e.target.value)} className="mt-1" />
+        </div>
+        <div>
+          <Label>Horaire</Label>
+          <Input type="time" value={horaire} onChange={e => setHoraire(e.target.value)} className="mt-1" />
+        </div>
+      </div>
+
+      {/* Type */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <Label>Type</Label>
+          {showAutoType && code && !customType && (
+            <span className="text-xs text-gray-400">Auto-détecté depuis le code</span>
+          )}
+        </div>
+        {customType || isCustomType ? (
+          <div className="flex gap-2">
+            <Input
+              placeholder="ex: Poids Lourd, SAV..."
+              value={customTypeVal || (isCustomType ? typeStr : '')}
+              onChange={e => handleCustomTypeInput(e.target.value)}
+              className="flex-1"
+            />
+            <Button size="sm" variant="outline" className="h-9 text-xs shrink-0"
+              onClick={() => { setCustomType(false); setTypeStr(detectTypeStr(code)); setCustomTypeVal(''); }}>
+              Preset
+            </Button>
+          </div>
+        ) : (
+          <select value={typeStr} onChange={e => handleTypeChange(e.target.value)} className={FILTER_SEL}>
+            {PRESET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            <option value="__custom__">Autre (saisir manuellement)…</option>
+          </select>
+        )}
+        {showAutoType && code && !customType && !isCustomType && (
+          <p className="text-xs text-gray-400 mt-1">
+            Code {code} → type détecté : <strong>{autoType}</strong>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Create Tour Modal ────────────────────────────────────────────────────────
 
 function CreateTourModal({ open, platforms, onClose, onCreated }: {
-  open: boolean; platforms: Platform[]; onClose: () => void; onCreated: () => void;
+  open: boolean; platforms: Platform[]; onClose: () => void; onCreated: (newPlatform?: Platform) => void;
 }) {
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
@@ -136,21 +294,23 @@ function CreateTourModal({ open, platforms, onClose, onCreated }: {
   const [quai, setQuai]       = useState('');
   const [horaire, setHoraire] = useState('');
   const [typeStr, setTypeStr] = useState('Standard');
+  const [newPlatform, setNewPlatform] = useState<Platform | undefined>();
 
   const { success, error, toasts, removeToast } = useToast();
-
-  const autoType = code ? detectTypeStr(code) : 'Standard';
 
   const mutation = useMutation({
     mutationFn: () => api.post('/tours', {
       tourCode: code, date, platformId: platId,
       quai: quai || undefined, horaire: horaire || undefined, tourType: typeStr,
     }),
-    onSuccess: () => { success('Tournée créée'); onCreated(); onClose(); resetForm(); },
+    onSuccess: () => { success('Tournée créée'); onCreated(newPlatform); onClose(); resetForm(); },
     onError: (e: any) => error(e.response?.data?.message || 'Erreur création'),
   });
 
-  const resetForm = () => { setCode(''); setDate(tomorrowStr); setPlatId(''); setQuai(''); setHoraire(''); setTypeStr('Standard'); };
+  const resetForm = () => {
+    setCode(''); setDate(tomorrowStr); setPlatId(''); setQuai('');
+    setHoraire(''); setTypeStr('Standard'); setNewPlatform(undefined);
+  };
   const canSave = code.trim() && date && platId;
 
   return (
@@ -164,63 +324,82 @@ function CreateTourModal({ open, platforms, onClose, onCreated }: {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Code tournée <span className="text-red-500">*</span></Label>
-                <Input
-                  type="text" placeholder="ex: 804"
-                  value={code} onChange={e => { setCode(e.target.value); setTypeStr(detectTypeStr(e.target.value)); }}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label>Date <span className="text-red-500">*</span></Label>
-                <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1" />
-              </div>
-            </div>
-
-            <div>
-              <Label>Plateforme <span className="text-red-500">*</span></Label>
-              <select value={platId} onChange={e => setPlatId(e.target.value)} className={`mt-1 ${FILTER_SEL}`}>
-                <option value="">— Sélectionner —</option>
-                {platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Quai</Label>
-                <Input placeholder="ex: 54" value={quai} onChange={e => setQuai(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Horaire</Label>
-                <Input type="time" value={horaire} onChange={e => setHoraire(e.target.value)} className="mt-1" />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label>Type</Label>
-                {code && <span className="text-xs text-gray-400">Auto-détecté depuis le code</span>}
-              </div>
-              <select value={typeStr} onChange={e => setTypeStr(e.target.value)} className={FILTER_SEL}>
-                {['Standard','GV','Install','Mono','Spéciale'].map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              {code && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Code {code} → type détecté : <strong>{autoType}</strong>
-                </p>
-              )}
-            </div>
-          </div>
+          <TourFormFields
+            code={code} setCode={setCode}
+            date={date} setDate={setDate}
+            platId={platId} setPlatId={setPlatId}
+            platforms={platforms}
+            onPlatformCreated={p => { setNewPlatform(p); }}
+            quai={quai} setQuai={setQuai}
+            horaire={horaire} setHoraire={setHoraire}
+            typeStr={typeStr} setTypeStr={setTypeStr}
+            showAutoType
+          />
 
           <DialogFooter>
             <Button variant="outline" onClick={() => { onClose(); resetForm(); }}>Annuler</Button>
             <Button onClick={() => mutation.mutate()} disabled={!canSave || mutation.isPending}>
               {mutation.isPending ? <><Loader2 size={14} className="mr-2 animate-spin" /> Création...</> : 'Créer la tournée'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ─── Edit Tour Modal ──────────────────────────────────────────────────────────
+
+function EditTourModal({ tour, platforms, onClose, onSaved }: {
+  tour: Tour; platforms: Platform[]; onClose: () => void; onSaved: (newPlatform?: Platform) => void;
+}) {
+  const [code, setCode]       = useState(tour.tourCode);
+  const [date, setDate]       = useState(tour.date.split('T')[0]);
+  const [platId, setPlatId]   = useState(tour.platform?.id ?? '');
+  const [quai, setQuai]       = useState(tour.quai ?? '');
+  const [horaire, setHoraire] = useState(tour.horaire ?? '');
+  const [typeStr, setTypeStr] = useState(tour.tourType ?? 'Standard');
+  const [newPlatform, setNewPlatform] = useState<Platform | undefined>();
+
+  const { success, error, toasts, removeToast } = useToast();
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/tours/${tour.id}`, {
+      tourCode: code, date, platformId: platId,
+      quai: quai || null, horaire: horaire || null, tourType: typeStr || null,
+    }),
+    onSuccess: () => { success('Tournée modifiée'); onSaved(newPlatform); onClose(); },
+    onError: (e: any) => error(e.response?.data?.message || 'Erreur modification'),
+  });
+
+  const canSave = code.trim() && date && platId;
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil size={18} className="text-blue-600" /> Modifier la tournée
+            </DialogTitle>
+          </DialogHeader>
+
+          <TourFormFields
+            code={code} setCode={setCode}
+            date={date} setDate={setDate}
+            platId={platId} setPlatId={setPlatId}
+            platforms={platforms}
+            onPlatformCreated={p => { setNewPlatform(p); }}
+            quai={quai} setQuai={setQuai}
+            horaire={horaire} setHoraire={setHoraire}
+            typeStr={typeStr} setTypeStr={setTypeStr}
+          />
+
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Annuler</Button>
+            <Button onClick={() => mutation.mutate()} disabled={!canSave || mutation.isPending}>
+              {mutation.isPending ? <><Loader2 size={14} className="mr-2 animate-spin" /> Enregistrement...</> : 'Enregistrer'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -396,7 +575,7 @@ function DeleteTourDialog({ tour, onClose, onDeleted }: {
 
 // ─── Tour row ────────────────────────────────────────────────────────────────
 
-function TourRow({ tour, onView, onDelete, dimmed }: { tour: Tour; onView: () => void; onDelete: () => void; dimmed?: boolean }) {
+function TourRow({ tour, onView, onEdit, onDelete, dimmed }: { tour: Tour; onView: () => void; onEdit: () => void; onDelete: () => void; dimmed?: boolean }) {
   const asgn = tour.assignments?.[0];
   const st   = statusMap[tour.status];
   const confirmed = tour.confirmationStatus === 'CONFIRMED';
@@ -463,6 +642,13 @@ function TourRow({ tour, onView, onDelete, dimmed }: { tour: Tour; onView: () =>
             Voir
           </button>
           <button
+            onClick={onEdit}
+            className="p-1.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="Modifier"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
             onClick={onDelete}
             className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
             title="Supprimer"
@@ -477,7 +663,7 @@ function TourRow({ tour, onView, onDelete, dimmed }: { tour: Tour; onView: () =>
 
 // ─── Tour card (mobile) ───────────────────────────────────────────────────────
 
-function TourCard({ tour, onView, onDelete }: { tour: Tour; onView: () => void; onDelete: () => void }) {
+function TourCard({ tour, onView, onEdit, onDelete }: { tour: Tour; onView: () => void; onEdit: () => void; onDelete: () => void }) {
   const asgn      = tour.assignments?.[0];
   const st        = statusMap[tour.status];
   const confirmed = tour.confirmationStatus === 'CONFIRMED';
@@ -497,12 +683,21 @@ function TourCard({ tour, onView, onDelete }: { tour: Tour; onView: () => void; 
           )}
           {tb && <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${tb.cls}`}>{tb.label}</span>}
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); onDelete(); }}
-          className="p-1 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex-shrink-0 touch-compact h-7 w-7 flex items-center justify-center"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            onClick={e => { e.stopPropagation(); onEdit(); }}
+            className="p-1 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50 h-7 w-7 flex items-center justify-center"
+            title="Modifier"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            className="p-1 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 h-7 w-7 flex items-center justify-center"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs text-gray-500 leading-snug mb-1.5">
@@ -531,9 +726,9 @@ function TourCard({ tour, onView, onDelete }: { tour: Tour; onView: () => void; 
 
 // ─── Date group ───────────────────────────────────────────────────────────────
 
-function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
+function DateGroup({ dateKey, tours, defaultExpanded, onView, onEdit, onDelete }: {
   dateKey: string; tours: Tour[]; defaultExpanded: boolean;
-  onView: (t: Tour) => void; onDelete: (t: Tour) => void;
+  onView: (t: Tour) => void; onEdit: (t: Tour) => void; onDelete: (t: Tour) => void;
 }) {
   const [open, setOpen] = useState(defaultExpanded);
 
@@ -582,7 +777,7 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
               </thead>
               <tbody>
                 {tours.map(t => (
-                  <TourRow key={t.id} tour={t} onView={() => onView(t)} onDelete={() => onDelete(t)} />
+                  <TourRow key={t.id} tour={t} onView={() => onView(t)} onEdit={() => onEdit(t)} onDelete={() => onDelete(t)} />
                 ))}
               </tbody>
             </table>
@@ -591,7 +786,7 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
           {/* Mobile: cards */}
           <div className="block md:hidden p-3 space-y-2">
             {tours.map(t => (
-              <TourCard key={t.id} tour={t} onView={() => onView(t)} onDelete={() => onDelete(t)} />
+              <TourCard key={t.id} tour={t} onView={() => onView(t)} onEdit={() => onEdit(t)} onDelete={() => onDelete(t)} />
             ))}
           </div>
         </>
@@ -602,8 +797,8 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onDelete }: {
 
 // ─── Detail panel ─────────────────────────────────────────────────────────────
 
-function DetailPanel({ tour, onClose, onDelete, onConfirm, onRefresh }: {
-  tour: Tour; onClose: () => void; onDelete: () => void; onConfirm: () => void; onRefresh: () => void;
+function DetailPanel({ tour, onClose, onEdit, onDelete, onConfirm, onRefresh }: {
+  tour: Tour; onClose: () => void; onEdit: () => void; onDelete: () => void; onConfirm: () => void; onRefresh: () => void;
 }) {
   const queryClient = useQueryClient();
   const asgn = tour.assignments?.[0];
@@ -859,6 +1054,12 @@ function DetailPanel({ tour, onClose, onDelete, onConfirm, onRefresh }: {
             </button>
           )}
           <button
+            onClick={onEdit}
+            className="w-full flex items-center justify-center gap-2 text-sm text-blue-600 border border-blue-200 rounded-lg py-2 hover:bg-blue-50 transition-colors"
+          >
+            <Pencil size={14} /> Modifier la tournée
+          </button>
+          <button
             onClick={onDelete}
             className="w-full flex items-center justify-center gap-2 text-sm text-red-600 border border-red-200 rounded-lg py-2 hover:bg-red-50 transition-colors"
           >
@@ -939,11 +1140,23 @@ export default function Tours() {
   const [histMonth, setHistMonth] = useState(now.getMonth() + 1);
   const [histYear, setHistYear]   = useState(now.getFullYear());
 
-  // Detail + create + delete + confirm
+  // Detail + create + edit + delete + confirm
   const [detail, setDetail]             = useState<Tour | null>(null);
   const [createOpen, setCreateOpen]     = useState(false);
+  const [editingTour, setEditingTour]   = useState<Tour | null>(null);
   const [deletingTour, setDeletingTour] = useState<Tour | null>(null);
   const [confirmingTour, setConfirmingTour] = useState<Tour | null>(null);
+
+  const handleEditDone = (newPlatform?: Platform) => {
+    setEditingTour(null);
+    showSuccess('Tournée modifiée');
+    if (newPlatform) queryClient.invalidateQueries({ queryKey: ['platforms'] });
+    queryClient.invalidateQueries({ queryKey: ['tours-active'] });
+    queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+    if (detail) {
+      api.get<Tour>(`/tours/${detail.id}`).then(r => setDetail(r.data)).catch(() => {});
+    }
+  };
 
   const handleDeleteDone = () => {
     setDeletingTour(null);
@@ -1152,6 +1365,7 @@ export default function Tours() {
               tours={dateTours}
               defaultExpanded={tab === 'active' && (dateKey === todayStr || dateKey === tomorrowStr)}
               onView={setDetail}
+              onEdit={setEditingTour}
               onDelete={setDeletingTour}
             />
           ))}
@@ -1163,6 +1377,7 @@ export default function Tours() {
         <DetailPanel
           tour={detail}
           onClose={() => setDetail(null)}
+          onEdit={() => setEditingTour(detail)}
           onDelete={() => setDeletingTour(detail)}
           onConfirm={() => setConfirmingTour(detail)}
           onRefresh={() => api.get<Tour>(`/tours/${detail.id}`).then(r => setDetail(r.data)).catch(() => {})}
@@ -1192,11 +1407,22 @@ export default function Tours() {
         open={createOpen}
         platforms={platforms ?? []}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => {
+        onCreated={(newPlatform) => {
+          if (newPlatform) queryClient.invalidateQueries({ queryKey: ['platforms'] });
           queryClient.invalidateQueries({ queryKey: ['tours-active'] });
           queryClient.invalidateQueries({ queryKey: ['tours-history'] });
         }}
       />
+
+      {/* ── Edit modal ─────────────────────────────────────────────────── */}
+      {editingTour && (
+        <EditTourModal
+          tour={editingTour}
+          platforms={platforms ?? []}
+          onClose={() => setEditingTour(null)}
+          onSaved={handleEditDone}
+        />
+      )}
     </div>
   );
 }

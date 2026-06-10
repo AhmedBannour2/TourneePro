@@ -20,6 +20,7 @@ import { GetToursQueryDto } from './dto/get-tours-query.dto';
 import { AssignTourDto } from './dto/assign-tour.dto';
 import { ConfirmTourDto } from './dto/confirm-tour.dto';
 import { CreateTourDto } from './dto/create-tour.dto';
+import { UpdateTourDto } from './dto/update-tour.dto';
 import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
 
 @ApiTags('tours')
@@ -61,6 +62,15 @@ export class ToursController {
   @ApiResponse({ status: 404, description: 'Tour not found' })
   findOne(@Param('id') id: string) {
     return this.toursService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Update tour details (code, date, platform, quai, horaire, type)' })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  updateTour(@Param('id') id: string, @Body() dto: UpdateTourDto) {
+    return this.toursService.updateTour(id, dto);
   }
 
   @Patch(':id/assignment')
