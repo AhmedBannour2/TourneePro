@@ -13,20 +13,8 @@ async function bootstrap() {
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
   // CORS — must be registered before Helmet
-  const allowedOrigins = (
-    process.env.CORS_ORIGINS ?? 'http://localhost:5173,https://tournee-pro-6kia.vercel.app'
-  )
-    .split(',')
-    .map((o) => o.trim());
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (curl, mobile apps, same-origin)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS: origin ${origin} not allowed`));
-      }
-    },
+    origin: true,
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
