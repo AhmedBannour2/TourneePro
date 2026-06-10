@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { CreateEmployeeAccountDto } from './dto/create-account.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { TourType } from '@prisma/client';
@@ -109,6 +110,27 @@ export class EmployeesService {
     });
 
     return { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt };
+  }
+
+  async updateAccount(employeeId: string, dto: UpdateAccountDto) {
+    const employee = await this.findOne(employeeId);
+
+    if (!employee.userId) throw new NotFoundException('Employee has no account to update');
+
+    const data: any = {};
+    if (dto.email) {
+      const conflict = await this.prisma.user.findFirst({
+        where: { email: dto.email, NOT: { id: employee.userId } },
+      });
+      if (conflict) throw new ConflictException('Email already registered');
+      data.email = dto.email;
+    }
+    if (dto.password) {
+      data.passwordHash = await bcrypt.hash(dto.password, 10);
+    }
+
+    const user = await this.prisma.user.update({ where: { id: employee.userId }, data });
+    return { id: user.id, email: user.email, role: user.role };
   }
 
   // ── Self-service profile (employee editing their own record) ──────────────

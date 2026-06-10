@@ -113,6 +113,12 @@ const accountSchema = z.object({
 });
 type AccountFormData = z.infer<typeof accountSchema>;
 
+const editAccountSchema = z.object({
+  email: z.string().email('Email valide requis'),
+  password: z.string().min(6, 'Minimum 6 caractères').optional().or(z.literal('')),
+});
+type EditAccountFormData = z.infer<typeof editAccountSchema>;
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function Employees() {
@@ -129,8 +135,9 @@ export default function Employees() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
 
-  // Create Account dialog
+  // Create/Edit Account dialog
   const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const [isEditAccount, setIsEditAccount] = useState(false);
   const [accountEmployee, setAccountEmployee] = useState<Employee | null>(null);
 
   // Profile panel
@@ -156,7 +163,7 @@ export default function Employees() {
   });
   const roleValue = watch('role');
 
-  // ── Account form ─────────────────────────────────────────────────────────────
+  // ── Account form (create) ─────────────────────────────────────────────────
 
   const {
     register: registerAccount,
@@ -164,6 +171,15 @@ export default function Employees() {
     reset: resetAccount,
     formState: { errors: accountErrors },
   } = useForm<AccountFormData>({ resolver: zodResolver(accountSchema) });
+
+  // ── Account form (edit) ───────────────────────────────────────────────────
+
+  const {
+    register: registerEditAccount,
+    handleSubmit: handleEditAccountSubmit,
+    reset: resetEditAccount,
+    formState: { errors: editAccountErrors },
+  } = useForm<EditAccountFormData>({ resolver: zodResolver(editAccountSchema) });
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -245,6 +261,20 @@ export default function Employees() {
     onError: (err: any) => error(err.response?.data?.message || 'Erreur création compte'),
   });
 
+  const updateAccountMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: EditAccountFormData }) =>
+      api.patch(`/employees/${id}/account`, data),
+    onSuccess: () => {
+      success('Compte mis à jour');
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setIsAccountOpen(false);
+      setIsEditAccount(false);
+      resetEditAccount();
+      setAccountEmployee(null);
+    },
+    onError: (err: any) => error(err.response?.data?.message || 'Erreur mise à jour compte'),
+  });
+
   const deleteDocMutation = useMutation({
     mutationFn: ({ empId, docId }: { empId: string; docId: string }) =>
       api.delete(`/employees/${empId}/documents/${docId}`),
@@ -292,7 +322,15 @@ export default function Employees() {
 
   const openAccountDialog = (emp: Employee) => {
     setAccountEmployee(emp);
+    setIsEditAccount(false);
     resetAccount();
+    setIsAccountOpen(true);
+  };
+
+  const openEditAccountDialog = (emp: Employee) => {
+    setAccountEmployee(emp);
+    setIsEditAccount(true);
+    resetEditAccount({ email: emp.user?.email ?? '', password: '' });
     setIsAccountOpen(true);
   };
 
@@ -442,7 +480,8 @@ export default function Employees() {
                         {emp.isActive ? <UserX className="w-4 h-4 text-red-500" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(emp)}><Pencil className="w-4 h-4" /></Button>
-                      {emp.userId ? <span className="p-1.5"><ShieldCheck className="w-4 h-4 text-green-500" /></span>
+                      {emp.userId
+                        ? <Button variant="ghost" size="sm" title="Modifier le compte" onClick={() => openEditAccountDialog(emp)}><Pencil className="w-4 h-4 text-indigo-600" /></Button>
                         : <Button variant="ghost" size="sm" onClick={() => openAccountDialog(emp)}><KeyRound className="w-4 h-4 text-indigo-600" /></Button>}
                     </div>
                   </td>
@@ -552,39 +591,69 @@ export default function Employees() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Create Account Dialog ───────────────────────────────────────────────── */}
-      <Dialog open={isAccountOpen} onOpenChange={(o) => { if (!o) { setIsAccountOpen(false); resetAccount(); setAccountEmployee(null); } }}>
+      {/* ── Create / Edit Account Dialog ────────────────────────────────────────── */}
+      <Dialog open={isAccountOpen} onOpenChange={(o) => {
+        if (!o) { setIsAccountOpen(false); setIsEditAccount(false); resetAccount(); resetEditAccount(); setAccountEmployee(null); }
+      }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Créer un compte — {accountEmployee?.name}</DialogTitle>
+            <DialogTitle>
+              {isEditAccount ? 'Modifier le compte' : 'Créer un compte'} — {accountEmployee?.name}
+            </DialogTitle>
           </DialogHeader>
-          <form
-            onSubmit={handleAccountSubmit((data) => {
+
+          {isEditAccount ? (
+            <form onSubmit={handleEditAccountSubmit((data) => {
+              if (accountEmployee) updateAccountMutation.mutate({ id: accountEmployee.id, data });
+            })} className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="edit-acc-email">Email <span className="text-red-500">*</span></Label>
+                <Input id="edit-acc-email" type="email" {...registerEditAccount('email')} placeholder="driver@stp.fr"
+                  className={editAccountErrors.email ? 'border-red-500' : ''} />
+                {editAccountErrors.email && <p className="text-xs text-red-600">{editAccountErrors.email.message}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-acc-pwd">Nouveau mot de passe</Label>
+                <Input id="edit-acc-pwd" type="password" {...registerEditAccount('password')}
+                  placeholder="Laisser vide pour ne pas changer"
+                  className={editAccountErrors.password ? 'border-red-500' : ''} />
+                {editAccountErrors.password && <p className="text-xs text-red-600">{editAccountErrors.password.message}</p>}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsAccountOpen(false)}>Annuler</Button>
+                <Button type="submit" disabled={updateAccountMutation.isPending}>
+                  {updateAccountMutation.isPending
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
+                    : 'Enregistrer'}
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : (
+            <form onSubmit={handleAccountSubmit((data) => {
               if (accountEmployee) createAccountMutation.mutate({ id: accountEmployee.id, data });
-            })}
-            className="space-y-4"
-          >
-            <div className="space-y-1">
-              <Label htmlFor="acc-email">Email <span className="text-red-500">*</span></Label>
-              <Input id="acc-email" type="email" {...registerAccount('email')} placeholder="driver@stp.fr"
-                className={accountErrors.email ? 'border-red-500' : ''} />
-              {accountErrors.email && <p className="text-xs text-red-600">{accountErrors.email.message}</p>}
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="acc-pwd">Mot de passe <span className="text-red-500">*</span></Label>
-              <Input id="acc-pwd" type="password" {...registerAccount('password')} placeholder="Min. 6 caractères"
-                className={accountErrors.password ? 'border-red-500' : ''} />
-              {accountErrors.password && <p className="text-xs text-red-600">{accountErrors.password.message}</p>}
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsAccountOpen(false)}>Annuler</Button>
-              <Button type="submit" disabled={createAccountMutation.isPending}>
-                {createAccountMutation.isPending
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Création...</>
-                  : 'Créer le compte'}
-              </Button>
-            </DialogFooter>
-          </form>
+            })} className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="acc-email">Email <span className="text-red-500">*</span></Label>
+                <Input id="acc-email" type="email" {...registerAccount('email')} placeholder="driver@stp.fr"
+                  className={accountErrors.email ? 'border-red-500' : ''} />
+                {accountErrors.email && <p className="text-xs text-red-600">{accountErrors.email.message}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="acc-pwd">Mot de passe <span className="text-red-500">*</span></Label>
+                <Input id="acc-pwd" type="password" {...registerAccount('password')} placeholder="Min. 6 caractères"
+                  className={accountErrors.password ? 'border-red-500' : ''} />
+                {accountErrors.password && <p className="text-xs text-red-600">{accountErrors.password.message}</p>}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsAccountOpen(false)}>Annuler</Button>
+                <Button type="submit" disabled={createAccountMutation.isPending}>
+                  {createAccountMutation.isPending
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Création...</>
+                    : 'Créer le compte'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -657,9 +726,14 @@ export default function Employees() {
                   <div className="border-t pt-4 space-y-2">
                     <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Compte applicatif</h3>
                     {panelEmployee.user?.email ? (
-                      <div className="flex items-center gap-2 text-sm">
-                        <ShieldCheck className="w-4 h-4 text-green-600" />
-                        <span className="text-gray-800">{panelEmployee.user.email}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-sm min-w-0">
+                          <ShieldCheck className="w-4 h-4 text-green-600 shrink-0" />
+                          <span className="text-gray-800 truncate">{panelEmployee.user.email}</span>
+                        </div>
+                        <Button size="sm" variant="outline" className="shrink-0" onClick={() => openEditAccountDialog(panelEmployee)}>
+                          <Pencil className="w-3.5 h-3.5 mr-1" /> Modifier
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex items-center gap-3">

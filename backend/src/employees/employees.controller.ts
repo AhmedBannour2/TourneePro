@@ -33,6 +33,7 @@ import { TrucksService } from '../trucks/trucks.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { CreateEmployeeAccountDto } from './dto/create-account.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -140,6 +141,14 @@ export class EmployeesController {
   @ApiOperation({ summary: 'Create login credentials for an employee (admin only)' })
   createAccount(@Param('id') id: string, @Body() dto: CreateEmployeeAccountDto) {
     return this.employeesService.createAccount(id, dto);
+  }
+
+  @Patch(':id/account')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update email and/or password for an employee account (admin only)' })
+  updateAccount(@Param('id') id: string, @Body() dto: UpdateAccountDto) {
+    return this.employeesService.updateAccount(id, dto);
   }
 
   // ── Documents ──────────────────────────────────────────────────────────────
