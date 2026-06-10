@@ -1,7 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
 import { SystemConfigService } from '../system-config/system-config.service';
 
 export interface InspectionRequestParams {
@@ -36,41 +34,16 @@ export interface AssignmentNotificationParams {
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
+  private readonly BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 
   constructor(
     private readonly config: ConfigService,
     private readonly systemConfig: SystemConfigService,
   ) {}
 
-  private async getTransporter(): Promise<Transporter | null> {
-    const db = await this.systemConfig.getMany([
-      'mail.host',
-      'mail.port',
-      'mail.user',
-      'mail.pass',
-    ]);
-
-    const host = db['mail.host'] || this.config.get<string>('MAIL_HOST');
-    if (!host) {
-      this.logger.warn('No SMTP host configured — email notifications disabled');
-      return null;
-    }
-
-    const port = Number(db['mail.port'] || this.config.get<string>('MAIL_PORT') || '465');
-    const user = db['mail.user'] || this.config.get<string>('MAIL_USER');
-    const pass = db['mail.pass'] || this.config.get<string>('MAIL_PASS');
-
-    this.logger.debug(`SMTP: ${host}:${port} (${db['mail.host'] ? 'DB' : 'env'})`);
-
-    return nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
+  private async getApiKey(): Promise<string | null> {
+    const dbKey = await this.systemConfig.get('brevo.api_key');
+    return dbKey || this.config.get<string>('BREVO_API_KEY') || null;
   }
 
   private async getFrom(): Promise<string> {
@@ -78,31 +51,65 @@ export class MailService {
     return dbFrom || this.config.get<string>('MAIL_FROM') || 'noreply@tournee.pro';
   }
 
-  async sendAssignmentNotification(params: AssignmentNotificationParams): Promise<void> {
-    const transporter = await this.getTransporter();
-    if (!transporter) {
-      this.logger.debug('Email skipped — SMTP not configured');
+  private async send(params: {
+    to: string;
+    subject: string;
+    textContent?: string;
+    htmlContent?: string;
+  }): Promise<void> {
+    const apiKey = await this.getApiKey();
+    if (!apiKey) {
+      this.logger.warn('BREVO_API_KEY not set — email notifications disabled');
       return;
     }
 
-    const from = await this.getFrom();
-    const subject = `Tournée ${params.tourCode} assignée — ${this.formatDate(params.tourDate)}`;
+    const fromAddress = await this.getFrom();
+    const senderName = fromAddress.match(/^(.+?)\s*</)?.[1]?.trim() ?? 'TourneePro';
+    const senderEmail = fromAddress.match(/<(.+?)>/)?.[1] ?? fromAddress;
 
-    await transporter.sendMail({ from, to: params.to, subject, html: this.buildHtml(params) });
-    this.logger.log(`Assignment email sent to ${params.to} (tour ${params.tourCode})`);
+    const body = {
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: params.to }],
+      subject: params.subject,
+      ...(params.htmlContent ? { htmlContent: params.htmlContent } : {}),
+      ...(params.textContent ? { textContent: params.textContent } : {}),
+    };
+
+    this.logger.debug(`Brevo API → ${params.to} — ${params.subject}`);
+
+    const res = await fetch(this.BREVO_URL, {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Brevo API ${res.status}: ${text}`);
+    }
+
+    this.logger.log(`Email sent to ${params.to} (${params.subject})`);
+  }
+
+  async sendAssignmentNotification(params: AssignmentNotificationParams): Promise<void> {
+    await this.send({
+      to: params.to,
+      subject: `Tournée ${params.tourCode} assignée — ${this.formatDate(params.tourDate)}`,
+      htmlContent: this.buildHtml(params),
+    });
   }
 
   async sendInspectionRequestEmail(params: InspectionRequestParams): Promise<void> {
-    const transporter = await this.getTransporter();
-    if (!transporter) return;
-    const from = await this.getFrom();
     const firstName = params.employeeName.split(' ')[0];
     const dateStr = this.formatDate(params.scheduledDate);
-    await transporter.sendMail({
-      from,
+    await this.send({
       to: params.to,
       subject: `Contrôle à effectuer — ${params.truckImmatriculation} — ${dateStr}`,
-      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+      htmlContent: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
         <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
           <div style="background:#1d4ed8;padding:24px 32px;">
             <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">🚚 TourneePro</p>
@@ -121,15 +128,9 @@ export class MailService {
         </div>
       </body></html>`,
     });
-    this.logger.log(
-      `Inspection request email sent to ${params.to} (truck ${params.truckImmatriculation})`,
-    );
   }
 
   async sendInspectionProblemEmail(params: InspectionProblemParams): Promise<void> {
-    const transporter = await this.getTransporter();
-    if (!transporter) return;
-    const from = await this.getFrom();
     const dateStr = this.formatDate(params.scheduledDate);
     const itemLabels: Record<string, string> = {
       HUILE: "Niveau d'huile",
@@ -146,11 +147,10 @@ export class MailService {
           `<td style="padding:8px 0 8px 16px;color:#374151;">${i.comment ?? '—'}</td></tr>`,
       )
       .join('');
-    await transporter.sendMail({
-      from,
+    await this.send({
       to: params.to,
       subject: `⚠️ Problème signalé — ${params.truckImmatriculation} — ${dateStr}`,
-      html: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
+      htmlContent: `<!DOCTYPE html><html lang="fr"><body style="font-family:sans-serif;background:#f1f5f9;padding:40px 16px;">
         <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08);">
           <div style="background:#dc2626;padding:24px 32px;">
             <p style="margin:0;color:#fff;font-size:20px;font-weight:800;">⚠️ TourneePro — Problème signalé</p>
@@ -164,19 +164,10 @@ export class MailService {
         </div>
       </body></html>`,
     });
-    this.logger.log(
-      `Inspection problem email sent to ${params.to} (truck ${params.truckImmatriculation})`,
-    );
   }
 
   async sendRaw(params: { to: string; subject: string; text: string }): Promise<void> {
-    const transporter = await this.getTransporter();
-    if (!transporter) {
-      this.logger.debug('Email skipped — SMTP not configured');
-      return;
-    }
-    const from = await this.getFrom();
-    await transporter.sendMail({ from, to: params.to, subject: params.subject, text: params.text });
+    await this.send({ to: params.to, subject: params.subject, textContent: params.text });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -203,11 +194,7 @@ export class MailService {
     if (p.horaire) details.push({ icon: '⏰', label: 'Horaire', value: p.horaire });
     if (p.partnerName) details.push({ icon: '👤', label: partnerLabel, value: p.partnerName });
     if (p.truckImmatriculation)
-      details.push({
-        icon: '🚛',
-        label: 'Camion',
-        value: p.truckImmatriculation,
-      });
+      details.push({ icon: '🚛', label: 'Camion', value: p.truckImmatriculation });
 
     const detailRows = details
       .map(
@@ -231,25 +218,18 @@ export class MailService {
   <title>Tournée assignée</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
     style="background-color:#f1f5f9;padding:48px 16px;">
     <tr>
       <td align="center">
-
-        <!-- Card wrapper -->
         <table role="presentation" cellpadding="0" cellspacing="0"
-          style="width:100%;max-width:580px;background:#ffffff;border-radius:16px;overflow:hidden;
-                 box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-
-          <!-- ── Header ─────────────────────────────────────────────────── -->
+          style="width:100%;max-width:580px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
           <tr>
             <td style="background:#1d4ed8;padding:28px 36px 24px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td>
-                    <p style="margin:0;color:#ffffff;font-size:22px;font-weight:800;
-                               letter-spacing:-0.3px;">
+                    <p style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.3px;">
                       🚚&nbsp; TourneePro
                     </p>
                     <p style="margin:4px 0 0;color:#93c5fd;font-size:13px;">
@@ -257,9 +237,7 @@ export class MailService {
                     </p>
                   </td>
                   <td align="right" style="vertical-align:middle;">
-                    <span style="display:inline-block;background:rgba(255,255,255,0.18);
-                                 color:#e0f2fe;font-size:12px;font-weight:700;
-                                 padding:5px 14px;border-radius:20px;white-space:nowrap;">
+                    <span style="display:inline-block;background:rgba(255,255,255,0.18);color:#e0f2fe;font-size:12px;font-weight:700;padding:5px 14px;border-radius:20px;white-space:nowrap;">
                       ${roleLabel}
                     </span>
                   </td>
@@ -267,75 +245,49 @@ export class MailService {
               </table>
             </td>
           </tr>
-
-          <!-- ── Body ──────────────────────────────────────────────────── -->
           <tr>
             <td style="padding:36px 36px 28px;">
-
-              <!-- Greeting -->
               <p style="margin:0 0 4px;font-size:20px;font-weight:700;color:#111827;">
                 Bonjour, ${firstName}&nbsp;! 👋
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#6b7280;line-height:1.6;">
                 Une tournée vous a été assignée. Voici les détails de votre mission.
               </p>
-
-              <!-- Tour card -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                 style="background:#eff6ff;border-radius:12px;border:1px solid #bfdbfe;">
                 <tr>
                   <td style="padding:24px 28px;">
-
-                    <!-- Tour code -->
-                    <p style="margin:0 0 4px;font-size:12px;color:#3b82f6;
-                               font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">
+                    <p style="margin:0 0 4px;font-size:12px;color:#3b82f6;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">
                       Tournée assignée
                     </p>
-                    <p style="margin:0 0 20px;font-size:30px;font-weight:800;color:#1e40af;
-                               letter-spacing:-0.5px;">
+                    <p style="margin:0 0 20px;font-size:30px;font-weight:800;color:#1e40af;letter-spacing:-0.5px;">
                       Tour&nbsp;${p.tourCode}
                     </p>
-
-                    <!-- Divider -->
                     <hr style="border:none;border-top:1px solid #bfdbfe;margin:0 0 16px;">
-
-                    <!-- Detail rows -->
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                       ${detailRows}
                     </table>
-
                   </td>
                 </tr>
               </table>
-
-              <!-- Closing -->
               <p style="margin:28px 0 4px;font-size:15px;font-weight:600;color:#111827;">
                 Bonne route&nbsp;! 🙌
               </p>
               <p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5;">
                 Pour toute question, contactez votre dispatcher directement.
               </p>
-
             </td>
           </tr>
-
-          <!-- ── Footer ─────────────────────────────────────────────────── -->
           <tr>
-            <td style="background:#f8fafc;border-top:1px solid #e2e8f0;
-                       padding:16px 36px;">
-              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;
-                         line-height:1.6;">
+            <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;">
                 Cet email a été envoyé automatiquement par
-                <strong style="color:#64748b;">TourneePro</strong>
-                · STP Logistics<br>
+                <strong style="color:#64748b;">TourneePro</strong> · STP Logistics<br>
                 Merci de ne pas répondre à cet email.
               </p>
             </td>
           </tr>
-
         </table>
-        <!-- /Card wrapper -->
-
       </td>
     </tr>
   </table>

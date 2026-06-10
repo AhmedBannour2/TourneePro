@@ -1,4 +1,14 @@
-import { Controller, Get, Put, Post, Body, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Put,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -49,11 +59,18 @@ export class SettingsController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Send a test email to the current admin account' })
   async testMail(@Request() req: any) {
-    await this.mailService.sendRaw({
-      to: req.user.email,
-      subject: 'TourneePro — Test SMTP ✅',
-      text: 'La configuration mail fonctionne correctement. Cet email a été envoyé depuis noreply@tournee.pro via Railway.',
-    });
-    return { sent: true, to: req.user.email };
+    try {
+      await this.mailService.sendRaw({
+        to: req.user.email,
+        subject: 'TourneePro — Test SMTP ✅',
+        text: 'La configuration mail fonctionne correctement. Cet email a été envoyé depuis noreply@tournee.pro via Railway.',
+      });
+      return { sent: true, to: req.user.email };
+    } catch (err: any) {
+      throw new HttpException(
+        { sent: false, error: err.message ?? 'SMTP error' },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
   }
 }
