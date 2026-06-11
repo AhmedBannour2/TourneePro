@@ -168,6 +168,171 @@ export class MailService {
     await this.send({ to: params.to, subject: params.subject, text: params.text });
   }
 
+  // ── Day Validation emails ──────────────────────────────────────────────────
+
+  async sendDayValidationEmail(params: {
+    to: string;
+    employeeName: string;
+    emailType: 'assigned' | 'repos' | 'unassigned' | 'modified';
+    date: Date;
+    tourCode?: string;
+    platformName?: string;
+    quai?: string | null;
+    horaire?: string | null;
+    role?: 'chauffeur' | 'aide';
+    partnerName?: string | null;
+  }): Promise<void> {
+    const firstName = params.employeeName.split(' ')[0];
+    const dateStr = this.formatDate(params.date);
+    const shortDate = new Date(params.date).toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+    });
+
+    const configs = {
+      assigned: {
+        subject: `Tournée ${params.tourCode} — ${shortDate}`,
+        accentColor: '#1d4ed8',
+        lightBg: '#eff6ff',
+        lightBorder: '#bfdbfe',
+        accentText: '#1e40af',
+        icon: '🚚',
+        headline: `Vous êtes affecté(e) le ${dateStr}`,
+        badgeLabel: params.role === 'chauffeur' ? 'Chauffeur-livreur' : 'Aide-livreur',
+        body: `Votre mission pour la journée du <strong>${dateStr}</strong> est confirmée.`,
+      },
+      repos: {
+        subject: `Repos — ${shortDate}`,
+        accentColor: '#16a34a',
+        lightBg: '#f0fdf4',
+        lightBorder: '#bbf7d0',
+        accentText: '#15803d',
+        icon: '✅',
+        headline: `Vous êtes en repos le ${dateStr}`,
+        badgeLabel: 'Repos',
+        body: `Vous n'avez pas de tournée assignée pour le <strong>${dateStr}</strong>.`,
+      },
+      unassigned: {
+        subject: `Désaffectation — ${shortDate}`,
+        accentColor: '#d97706',
+        lightBg: '#fffbeb',
+        lightBorder: '#fde68a',
+        accentText: '#b45309',
+        icon: '⚠️',
+        headline: `Votre affectation du ${dateStr} a changé`,
+        badgeLabel: 'Désaffecté(e)',
+        body: `Vous n'êtes plus affecté(e) à la tournée <strong>${params.tourCode}</strong> du <strong>${dateStr}</strong>. Contactez votre dispatcher pour plus d'informations.`,
+      },
+      modified: {
+        subject: `Modification — Tournée ${params.tourCode} — ${shortDate}`,
+        accentColor: '#7c3aed',
+        lightBg: '#f5f3ff',
+        lightBorder: '#ddd6fe',
+        accentText: '#6d28d9',
+        icon: '✏️',
+        headline: `Votre mission du ${dateStr} a été modifiée`,
+        badgeLabel: 'Modifié(e)',
+        body: `Les détails de votre tournée <strong>${params.tourCode}</strong> du <strong>${dateStr}</strong> ont été mis à jour.`,
+      },
+    };
+
+    const cfg = configs[params.emailType];
+    const roleLabel =
+      params.role === 'chauffeur'
+        ? 'Chauffeur-livreur'
+        : params.role === 'aide'
+          ? 'Aide-livreur'
+          : null;
+    const partnerLabel = params.role === 'chauffeur' ? 'Aide-livreur' : 'Chauffeur-livreur';
+
+    const detailRows: string[] = [];
+    if (params.tourCode && params.emailType !== 'repos') {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:120px;">🚚 Tournée</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:700;">${params.tourCode}</td></tr>`,
+      );
+    }
+    if (params.platformName) {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">🏭 Plateforme</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;">${params.platformName}</td></tr>`,
+      );
+    }
+    if (params.quai) {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">🚪 Quai</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;">${params.quai}</td></tr>`,
+      );
+    }
+    if (params.horaire) {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">⏰ Horaire</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;">${params.horaire}</td></tr>`,
+      );
+    }
+    if (roleLabel) {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">👤 Rôle</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;">${roleLabel}</td></tr>`,
+      );
+    }
+    if (params.partnerName) {
+      detailRows.push(
+        `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">👤 ${partnerLabel}</td><td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;">${params.partnerName}</td></tr>`,
+      );
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:48px 16px;">
+    <tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:580px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:${cfg.accentColor};padding:28px 36px 24px;">
+            <p style="margin:0;color:#fff;font-size:22px;font-weight:800;">${cfg.icon}&nbsp; TourneePro</p>
+            <p style="margin:4px 0 0;color:rgba(255,255,255,.7);font-size:13px;">STP Logistics — Notification dispatcher</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:36px 36px 28px;">
+            <p style="margin:0 0 4px;font-size:20px;font-weight:700;color:#111827;">Bonjour, ${firstName}&nbsp;! 👋</p>
+            <p style="margin:0 0 24px;font-size:15px;color:#6b7280;">${cfg.headline}</p>
+            ${
+              detailRows.length > 0
+                ? `
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+              style="background:${cfg.lightBg};border:1px solid ${cfg.lightBorder};border-radius:12px;">
+              <tr><td style="padding:20px 24px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  ${detailRows.join('')}
+                </table>
+              </td></tr>
+            </table>`
+                : `
+            <div style="background:${cfg.lightBg};border:1px solid ${cfg.lightBorder};border-radius:12px;padding:20px 24px;">
+              <p style="margin:0;font-size:15px;color:${cfg.accentText};">${cfg.body}</p>
+            </div>`
+            }
+            ${detailRows.length > 0 ? `<p style="margin:20px 0 0;font-size:15px;color:#374151;">${cfg.body}</p>` : ''}
+            <div style="margin-top:24px;">
+              <a href="https://tournee.pro" style="display:inline-block;background:${cfg.accentColor};color:#fff;font-size:14px;font-weight:600;padding:12px 24px;border-radius:8px;text-decoration:none;">
+                Voir sur TourneePro →
+              </a>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;">
+            <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">
+              Envoyé automatiquement par <strong style="color:#64748b;">TourneePro</strong> · STP Logistics<br>Ne pas répondre à cet email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+    await this.send({ to: params.to, subject: cfg.subject, html });
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private formatDate(date: Date): string {

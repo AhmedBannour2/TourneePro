@@ -22,6 +22,12 @@ export class ConfirmTourDto {
   @Min(0)
   nonConform!: number;
 
+  @ApiPropertyOptional({ description: 'Number of appliances collected (D3E / WEEE)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  d3e?: number;
+
   @ApiPropertyOptional({ description: 'Optional notes about the tour' })
   @IsOptional()
   @IsString()

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
   ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck, RefreshCw,
-  SlidersHorizontal, Pencil,
+  SlidersHorizontal, Pencil, Bell, BellOff,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -66,6 +66,7 @@ interface TourConfirmation {
   id: string;
   confirmedBy: { id: string; name: string };
   totalClients: number; delivered: number; absent: number; nonConform: number;
+  d3e: number | null;
   notes: string | null; confirmedAt: string; updatedAt: string;
 }
 
@@ -412,9 +413,9 @@ function EditTourModal({ tour, platforms, onClose, onSaved }: {
 // ─── Admin confirm modal ─────────────────────────────────────────────────────
 
 interface ConfirmFields {
-  totalClients: string; delivered: string; absent: string; nonConform: string; notes: string;
+  totalClients: string; delivered: string; absent: string; nonConform: string; d3e: string; notes: string;
 }
-const EMPTY_CONF: ConfirmFields = { totalClients: '', delivered: '', absent: '', nonConform: '', notes: '' };
+const EMPTY_CONF: ConfirmFields = { totalClients: '', delivered: '', absent: '', nonConform: '', d3e: '', notes: '' };
 
 function AdminConfirmModal({ tour, onClose, onSaved }: {
   tour: Tour; onClose: () => void; onSaved: () => void;
@@ -424,7 +425,8 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
   const [f, setF] = useState<ConfirmFields>(
     isEdit && existing
       ? { totalClients: String(existing.totalClients), delivered: String(existing.delivered),
-          absent: String(existing.absent), nonConform: String(existing.nonConform), notes: existing.notes ?? '' }
+          absent: String(existing.absent), nonConform: String(existing.nonConform),
+          d3e: existing.d3e != null ? String(existing.d3e) : '', notes: existing.notes ?? '' }
       : EMPTY_CONF,
   );
   const { error: toastError, toasts, removeToast } = useToast();
@@ -487,6 +489,10 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
               </div>
             )}
             <div>
+              <Label>D3E <span className="text-xs font-normal text-gray-400">(appareils repris)</span></Label>
+              <Input type="number" min="0" value={f.d3e} onChange={set('d3e')} placeholder="0" className="mt-1 w-40" />
+            </div>
+            <div>
               <Label>Notes (optionnel)</Label>
               <textarea value={f.notes} onChange={set('notes')} placeholder="Observations..."
                 rows={2} className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
@@ -496,7 +502,7 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>Annuler</Button>
             <Button
-              onClick={() => mut.mutate({ totalClients: n(f.totalClients), delivered: n(f.delivered), absent: n(f.absent), nonConform: n(f.nonConform), notes: f.notes || undefined })}
+              onClick={() => mut.mutate({ totalClients: n(f.totalClients), delivered: n(f.delivered), absent: n(f.absent), nonConform: n(f.nonConform), d3e: f.d3e ? n(f.d3e) : undefined, notes: f.notes || undefined })}
               disabled={!valid || mut.isPending}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
@@ -725,6 +731,263 @@ function TourCard({ tour, onView, onEdit, onDelete }: { tour: Tour; onView: () =
   );
 }
 
+// ─── Validation types ─────────────────────────────────────────────────────────
+
+interface ValidationPreviewAssigned {
+  employeeId: string; employeeName: string; email: string | null;
+  role: 'chauffeur' | 'aide'; tourId: string; tourCode: string;
+  platformName: string | null; quai: string | null; horaire: string | null;
+  partnerName: string | null; isNew: boolean; isModified: boolean;
+}
+interface ValidationPreviewRepos {
+  employeeId: string; employeeName: string; email: string | null;
+  wasAssigned: boolean; prevTourCode: string | null;
+}
+interface ValidationPreview {
+  date: string;
+  validation: { id: string; validatedAt: string } | null;
+  isDirty: boolean;
+  assigned: ValidationPreviewAssigned[];
+  repos: ValidationPreviewRepos[];
+}
+
+// ─── ValidationModal ──────────────────────────────────────────────────────────
+
+function ValidationModal({ dateKey, onClose, onValidated }: {
+  dateKey: string; onClose: () => void; onValidated: () => void;
+}) {
+  const { success, error: showError, toasts, removeToast } = useToast();
+
+  const { data: preview, isLoading } = useQuery<ValidationPreview>({
+    queryKey: ['validation-preview', dateKey],
+    queryFn: () => api.get<ValidationPreview>(`/tours/days/${dateKey}/validation-preview`).then(r => r.data),
+  });
+
+  const isFirstValidation = !preview?.validation;
+  const isRevalidation = !!preview?.validation && preview.isDirty;
+
+  // Build initial checked set
+  const buildInitialChecked = (p: ValidationPreview): Set<string> => {
+    const s = new Set<string>();
+    if (!p.validation) {
+      // First time: all checked
+      p.assigned.forEach(e => s.add(e.employeeId));
+      p.repos.forEach(e => s.add(e.employeeId));
+    } else {
+      // Re-validation: only delta checked by default
+      p.assigned.filter(e => e.isNew || e.isModified).forEach(e => s.add(e.employeeId));
+      p.repos.filter(e => e.wasAssigned).forEach(e => s.add(e.employeeId));
+    }
+    return s;
+  };
+
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (preview && !initialized) {
+      setChecked(buildInitialChecked(preview));
+      setInitialized(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, initialized]);
+
+  const toggle = (id: string) => setChecked(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: () => api.post(`/tours/days/${dateKey}/validate`, {
+      employeeIdsToNotify: Array.from(checked),
+    }),
+    onSuccess: () => {
+      success('Journée validée — notifications envoyées');
+      onValidated();
+      onClose();
+    },
+    onError: (e: any) => showError(e.response?.data?.message || 'Erreur lors de la validation'),
+  });
+
+  const dateLabel = new Date(dateKey + 'T12:00:00').toLocaleDateString('fr-FR', {
+    weekday: 'long', day: '2-digit', month: 'long',
+  });
+
+  const checkedCount = checked.size;
+
+  // For re-validation, also show unchanged employees (collapsed by default)
+  const unchangedAssigned = preview?.assigned.filter(e => !e.isNew && !e.isModified) ?? [];
+  const unchangedRepos = preview?.repos.filter(e => !e.wasAssigned) ?? [];
+  const [showUnchanged, setShowUnchanged] = useState(false);
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Bell size={18} className="text-blue-600" />
+              Valider la journée — <span className="capitalize">{dateLabel}</span>
+            </DialogTitle>
+            {preview?.validation && (
+              <p className="text-xs text-gray-500 mt-1">
+                Dernière validation : {new Date(preview.validation.validatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto py-2 space-y-4 min-h-0">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8 text-gray-400">
+                <Loader2 size={20} className="animate-spin mr-2" /> Chargement…
+              </div>
+            ) : !preview ? null : (
+              <>
+                {/* Delta notice for re-validation */}
+                {isRevalidation && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                    Des modifications ont eu lieu depuis la dernière validation. Seuls les changements sont cochés par défaut.
+                  </div>
+                )}
+
+                {/* Assigned employees */}
+                {preview.assigned.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      Affectés ({preview.assigned.filter(e => isFirstValidation || e.isNew || e.isModified).length})
+                    </p>
+                    <div className="space-y-1">
+                      {(isFirstValidation ? preview.assigned : preview.assigned.filter(e => e.isNew || e.isModified)).map(emp => (
+                        <label key={emp.employeeId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors
+                          ${checked.has(emp.employeeId) ? 'border-blue-200 bg-blue-50' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked.has(emp.employeeId)}
+                            onChange={() => toggle(emp.employeeId)}
+                            className="w-4 h-4 rounded text-blue-600 border-gray-300"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-sm text-gray-900 truncate">{emp.employeeName}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${emp.role === 'chauffeur' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                                {emp.role === 'chauffeur' ? 'Chauffeur' : 'Aide'}
+                              </span>
+                              {!isFirstValidation && emp.isNew && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Nouveau</span>}
+                              {!isFirstValidation && emp.isModified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Modifié</span>}
+                            </div>
+                            <p className="text-xs text-gray-500 truncate">
+                              Tournée <strong>{emp.tourCode}</strong>{emp.platformName ? ` · ${emp.platformName}` : ''}{emp.horaire ? ` · ${emp.horaire}` : ''}
+                            </p>
+                            {!emp.email && <p className="text-[10px] text-red-500">Pas d'email configuré</p>}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Repos employees */}
+                {(isFirstValidation ? preview.repos : preview.repos.filter(e => e.wasAssigned)).length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      {isFirstValidation ? `Repos (${preview.repos.length})` : `Désaffectés (${preview.repos.filter(e => e.wasAssigned).length})`}
+                    </p>
+                    <div className="space-y-1">
+                      {(isFirstValidation ? preview.repos : preview.repos.filter(e => e.wasAssigned)).map(emp => (
+                        <label key={emp.employeeId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors
+                          ${checked.has(emp.employeeId) ? 'border-green-200 bg-green-50' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked.has(emp.employeeId)}
+                            onChange={() => toggle(emp.employeeId)}
+                            className="w-4 h-4 rounded text-green-600 border-gray-300"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-sm text-gray-900 truncate">{emp.employeeName}</span>
+                              {emp.wasAssigned && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Désaffecté</span>}
+                              {!emp.wasAssigned && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">Repos</span>}
+                            </div>
+                            {emp.wasAssigned && emp.prevTourCode && (
+                              <p className="text-xs text-gray-500">Était sur la tournée <strong>{emp.prevTourCode}</strong></p>
+                            )}
+                            {!emp.email && <p className="text-[10px] text-red-500">Pas d'email configuré</p>}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Unchanged section (collapsed, re-validation only) */}
+                {!isFirstValidation && (unchangedAssigned.length + unchangedRepos.length) > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setShowUnchanged(o => !o)}
+                      className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+                    >
+                      {showUnchanged ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      Inchangés ({unchangedAssigned.length + unchangedRepos.length}) — décoché par défaut
+                    </button>
+                    {showUnchanged && (
+                      <div className="mt-2 space-y-1">
+                        {[...unchangedAssigned.map(e => ({ ...e, type: 'assigned' as const })),
+                          ...unchangedRepos.map(e => ({ ...e, type: 'repos' as const }))].map(emp => (
+                          <label key={emp.employeeId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors
+                            ${checked.has(emp.employeeId) ? 'border-blue-200 bg-blue-50' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked.has(emp.employeeId)}
+                              onChange={() => toggle(emp.employeeId)}
+                              className="w-4 h-4 rounded border-gray-300"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium text-sm text-gray-700">{emp.employeeName}</span>
+                              <span className="ml-2 text-[10px] text-gray-400">
+                                {emp.type === 'assigned' ? `Tournée ${'tourCode' in emp ? emp.tourCode : ''}` : 'Repos'}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {preview.assigned.length === 0 && preview.repos.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-4">Aucun employé actif trouvé pour cette journée.</p>
+                )}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="shrink-0 border-t pt-3">
+            <div className="flex items-center justify-between w-full gap-3">
+              <span className="text-xs text-gray-500">{checkedCount} notification{checkedCount > 1 ? 's' : ''} sélectionnée{checkedCount > 1 ? 's' : ''}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={onClose}>Annuler</Button>
+                <Button
+                  onClick={() => validateMutation.mutate()}
+                  disabled={validateMutation.isPending || isLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {validateMutation.isPending
+                    ? <><Loader2 size={14} className="mr-1.5 animate-spin" /> Envoi…</>
+                    : checkedCount === 0
+                    ? 'Valider sans email'
+                    : `Envoyer ${checkedCount} notification${checkedCount > 1 ? 's' : ''}`}
+                </Button>
+              </div>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ─── Date group ───────────────────────────────────────────────────────────────
 
 function DateGroup({ dateKey, tours, defaultExpanded, onView, onEdit, onDelete }: {
@@ -732,6 +995,8 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onEdit, onDelete }
   onView: (t: Tour) => void; onEdit: (t: Tour) => void; onDelete: (t: Tour) => void;
 }) {
   const [open, setOpen] = useState(defaultExpanded);
+  const [validateOpen, setValidateOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const assigned  = tours.filter(t => t.status !== 'imported' && t.status !== 'cancelled').length;
 
@@ -742,26 +1007,71 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onEdit, onDelete }
   const todayStr = new Date().toISOString().split('T')[0];
   const isToday  = dateKey === todayStr;
 
+  // Validation state — invalidated by assignment/edit mutations, refetched immediately
+  const { data: valPreview } = useQuery<ValidationPreview>({
+    queryKey: ['validation-preview', dateKey],
+    queryFn: () => api.get<ValidationPreview>(`/tours/days/${dateKey}/validation-preview`).then(r => r.data),
+    staleTime: 30000,
+    enabled: !validateOpen,
+  });
+
+  const isValidated = !!valPreview?.validation && !valPreview.isDirty;
+  const isDirty     = !!valPreview?.validation && valPreview.isDirty;
+  const validatedAt = valPreview?.validation?.validatedAt;
+  const shortDate   = validatedAt
+    ? new Date(validatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
+    : null;
+
   return (
     <div className="rounded-xl border overflow-hidden">
       {/* Header */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors
-          ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-50 hover:bg-gray-100'}`}
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      <div className={`flex items-center justify-between px-4 py-3 transition-colors
+        ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-50'}`}>
+        {/* Left: expand toggle */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+        >
           <span className={`font-semibold capitalize truncate ${isToday ? 'text-white' : 'text-gray-800'}`}>{label}</span>
           {isToday && <span className="hidden sm:inline text-xs bg-white/20 px-2 py-0.5 rounded-full font-medium flex-shrink-0">Aujourd'hui</span>}
-        </div>
-        <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
-          <div className={`flex items-center gap-1.5 md:gap-3 text-xs md:text-sm ${isToday ? 'text-blue-100' : 'text-gray-500'}`}>
+          <div className={`flex items-center gap-1.5 md:gap-3 text-xs md:text-sm ml-auto mr-2 ${isToday ? 'text-blue-100' : 'text-gray-500'}`}>
             <span className="font-medium">{tours.length}</span>
             {assigned > 0 && <span className={isToday ? 'text-blue-100' : 'text-blue-600 font-medium'}>{assigned}✓</span>}
           </div>
-          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </div>
-      </button>
+          {open ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
+        </button>
+
+        {/* Right: validate button */}
+        <button
+          onClick={e => { e.stopPropagation(); setValidateOpen(true); }}
+          className={`ml-3 shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors
+            ${isValidated
+              ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100'
+              : isDirty
+              ? 'border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100'
+              : isToday
+              ? 'border-white/30 text-white bg-white/10 hover:bg-white/20'
+              : 'border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100'
+            }`}
+        >
+          {isValidated
+            ? <><CheckCircle2 size={13} /> <span className="hidden sm:inline">Validée {shortDate}</span></>
+            : isDirty
+            ? <><Bell size={13} className="shrink-0" /> <span className="hidden sm:inline">Valider la journée</span></>
+            : <><BellOff size={13} className="shrink-0" /> <span className="hidden sm:inline">Valider la journée</span></>
+          }
+        </button>
+      </div>
+
+      {validateOpen && (
+        <ValidationModal
+          dateKey={dateKey}
+          onClose={() => setValidateOpen(false)}
+          onValidated={() => {
+            queryClient.invalidateQueries({ queryKey: ['validation-preview', dateKey] });
+          }}
+        />
+      )}
 
       {/* Rows */}
       {open && (
@@ -869,6 +1179,7 @@ function DetailPanel({ tour, onClose, onEdit, onDelete, onConfirm, onRefresh }: 
       queryClient.invalidateQueries({ queryKey: ['tours-active'] });
       queryClient.invalidateQueries({ queryKey: ['tours-history'] });
       queryClient.invalidateQueries({ queryKey: ['tours-same-day', tourDateStr] });
+      queryClient.invalidateQueries({ queryKey: ['validation-preview', tourDateStr] });
       onRefresh();
     },
   });
@@ -879,6 +1190,7 @@ function DetailPanel({ tour, onClose, onEdit, onDelete, onConfirm, onRefresh }: 
       setChauffeurId(''); setAideId(''); setTruckId('');
       queryClient.invalidateQueries({ queryKey: ['tours-active'] });
       queryClient.invalidateQueries({ queryKey: ['tours-same-day', tourDateStr] });
+      queryClient.invalidateQueries({ queryKey: ['validation-preview', tourDateStr] });
       onRefresh();
     },
   });
@@ -1020,6 +1332,9 @@ function DetailPanel({ tour, onClose, onEdit, onDelete, onConfirm, onRefresh }: 
                   <SBox label="Livrés" value={tour.confirmation.delivered} color="text-green-700" bg="bg-green-50" />
                   <SBox label="Absents" value={tour.confirmation.absent} color="text-orange-700" bg="bg-orange-50" />
                   <SBox label="Non-conf." value={tour.confirmation.nonConform} color="text-red-700" bg="bg-red-50" />
+                  {tour.confirmation.d3e != null && (
+                    <SBox label="D3E" value={tour.confirmation.d3e} color="text-teal-700" bg="bg-teal-50" />
+                  )}
                 </div>
                 <div className="bg-blue-50 rounded-lg px-3 py-2 flex justify-between">
                   <span className="text-sm text-blue-700 font-medium">Taux de livraison</span>
@@ -1155,6 +1470,7 @@ export default function Tours() {
     if (newPlatform) queryClient.invalidateQueries({ queryKey: ['platforms'] });
     queryClient.invalidateQueries({ queryKey: ['tours-active'] });
     queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+    queryClient.invalidateQueries({ queryKey: ['validation-preview'] });
     if (detail) {
       api.get<Tour>(`/tours/${detail.id}`).then(r => setDetail(r.data)).catch(() => {});
     }
@@ -1166,6 +1482,7 @@ export default function Tours() {
     showSuccess('Tournée supprimée');
     queryClient.invalidateQueries({ queryKey: ['tours-active'] });
     queryClient.invalidateQueries({ queryKey: ['tours-history'] });
+    queryClient.invalidateQueries({ queryKey: ['validation-preview'] });
   };
 
   const handleConfirmDone = () => {

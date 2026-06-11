@@ -21,6 +21,7 @@ import { AssignTourDto } from './dto/assign-tour.dto';
 import { ConfirmTourDto } from './dto/confirm-tour.dto';
 import { CreateTourDto } from './dto/create-tour.dto';
 import { UpdateTourDto } from './dto/update-tour.dto';
+import { ValidateDayDto } from './dto/validate-day.dto';
 import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
 
 @ApiTags('tours')
@@ -140,6 +141,24 @@ export class ToursController {
   @ApiParam({ name: 'id', description: 'Tour UUID' })
   updateConfirmation(@Param('id') id: string, @Body() dto: ConfirmTourDto, @Req() req: any) {
     return this.toursService.updateConfirmation(id, dto, req.user.id);
+  }
+
+  @Get('days/:date/validation-preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Preview who will be notified when validating a day' })
+  @ApiParam({ name: 'date', description: 'Date in YYYY-MM-DD format' })
+  getValidationPreview(@Param('date') date: string) {
+    return this.toursService.getValidationPreview(date);
+  }
+
+  @Post('days/:date/validate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Send day validation emails and record snapshot' })
+  @ApiParam({ name: 'date', description: 'Date in YYYY-MM-DD format' })
+  validateDay(@Param('date') date: string, @Body() dto: ValidateDayDto, @Req() req: any) {
+    return this.toursService.validateDay(date, dto, req.user.id);
   }
 
   @Post(':id/assignment/seen')

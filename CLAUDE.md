@@ -128,8 +128,15 @@ Two Boulanger Google Sheets are synced via the **"Actualiser"** button on the To
 OAuth credentials stored in Railway env vars (not .env). Admin can reconnect or swap accounts in Settings → Google Sheets.
 Sync is idempotent: re-running updates existing tours, never duplicates.
 
+## Email (Resend — active as of June 2026)
+
+- Provider: **Resend** HTTP API (`https://api.resend.com/emails`) — Railway blocks all SMTP ports, never use nodemailer/SMTP
+- Sender: `TourneePro <noreply@tournee.pro>` — domain verified on Resend (DKIM + SPF + MX on OVH)
+- Config: `RESEND_API_KEY` env var in Railway (fallback); also reads `resend.api_key` from SystemConfig DB
+- From address: reads `mail.from` from SystemConfig DB, falls back to `MAIL_FROM` env var, then hardcoded default
+- Test endpoint: `POST /settings/mail/test` (admin only) — sends test email to current user
+
 ## Pending / Not Yet Built
 
-- **Mail service reads from DB**: Settings mail config saves to `system_config` table but `mail.service.ts` still reads from `.env`. Needs wiring so UI changes take effect without server restart.
 - **Auto-sync cron**: currently manual (Actualiser button). Could be automated to run each morning.
 - **Google Cloud migration**: OAuth project currently under personal Gmail (`couco1995@gmail.com`). Migrate to STP Gmail before production.

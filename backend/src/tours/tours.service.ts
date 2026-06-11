@@ -17,6 +17,7 @@ import { ConfirmationStatus, WorkedDayStatus, TourSource } from '@prisma/client'
 import { ConflictException } from '@nestjs/common';
 import { CreateTourDto } from './dto/create-tour.dto';
 import { UpdateTourDto } from './dto/update-tour.dto';
+import { ValidateDayDto } from './dto/validate-day.dto';
 
 @Injectable()
 export class ToursService {
@@ -313,11 +314,6 @@ export class ToursService {
       this.logger.error('WorkedDay auto-create failed', err?.message ?? err);
     }
 
-    // Fire-and-forget — never delay the API response for email delivery
-    this.sendAssignmentEmails(tour, assignment).catch((err: Error) =>
-      this.logger.error('Assignment email failed', err.message),
-    );
-
     // In-app notifications for assigned employees
     const dateStr = tour.date.toLocaleDateString('fr-FR', {
       day: '2-digit',
@@ -583,6 +579,7 @@ export class ToursService {
           delivered: dto.delivered,
           absent: dto.absent,
           nonConform: dto.nonConform,
+          d3e: dto.d3e ?? null,
           notes: dto.notes ?? null,
         },
         include: { confirmedBy: { select: { id: true, name: true } } },
@@ -634,6 +631,7 @@ export class ToursService {
           delivered: dto.delivered,
           absent: dto.absent,
           nonConform: dto.nonConform,
+          d3e: dto.d3e ?? null,
           notes: dto.notes ?? null,
         },
         include: { confirmedBy: { select: { id: true, name: true } } },
@@ -817,65 +815,225 @@ export class ToursService {
     });
   }
 
-  // ── Email helpers ──────────────────────────────────────────────────────────
+  // ── Day Validation ─────────────────────────────────────────────────────────
 
-  private async sendAssignmentEmails(
-    tour: Awaited<ReturnType<typeof this.findOne>>,
-    assignment: {
-      chauffeurId: string | null;
-      aideId: string | null;
-      chauffeur: { name: string } | null;
-      aide: { name: string } | null;
-      truck: { immatriculation: string } | null;
-    },
-  ): Promise<void> {
-    const common = {
-      tourCode: tour.tourCode,
-      tourDate: tour.date,
-      platformName: (tour.platform as { name: string } | null)?.name ?? '',
-      quai: tour.quai,
-      horaire: tour.horaire,
-      truckImmatriculation: assignment.truck?.immatriculation ?? null,
+  async getValidationPreview(date: string) {
+    const d = new Date(date + 'T00:00:00.000Z');
+    const dayStart = new Date(d);
+    const dayEnd = new Date(d);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+
+    const [tours, activeEmployees, validation] = await Promise.all([
+      this.prisma.tour.findMany({
+        where: { date: { gte: dayStart, lte: dayEnd } },
+        include: {
+          platform: true,
+          assignments: {
+            include: {
+              chauffeur: { include: { user: { select: { email: true } } } },
+              aide: { include: { user: { select: { email: true } } } },
+            },
+          },
+        },
+      }),
+      this.prisma.employee.findMany({
+        where: { isActive: true },
+        include: { user: { select: { email: true } } },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.dayValidation.findUnique({ where: { date: d } }),
+    ]);
+
+    type Assigned = {
+      employeeId: string;
+      employeeName: string;
+      email: string | null;
+      role: 'chauffeur' | 'aide';
+      tourId: string;
+      tourCode: string;
+      platformName: string | null;
+      quai: string | null;
+      horaire: string | null;
+      partnerName: string | null;
+      isNew: boolean;
+      isModified: boolean;
     };
+    type Repos = {
+      employeeId: string;
+      employeeName: string;
+      email: string | null;
+      wasAssigned: boolean;
+      prevTourCode: string | null;
+    };
+
+    const assigned: Assigned[] = [];
+    const assignedIds = new Set<string>();
+
+    for (const tour of tours) {
+      for (const asgn of tour.assignments) {
+        const platformName = (tour.platform as { name: string } | null)?.name ?? null;
+        if (asgn.chauffeurId && asgn.chauffeur) {
+          const partner = asgn.aide ? asgn.aide.name : null;
+          assigned.push({
+            employeeId: asgn.chauffeurId,
+            employeeName: asgn.chauffeur.name,
+            email: asgn.chauffeur.user?.email ?? null,
+            role: 'chauffeur',
+            tourId: tour.id,
+            tourCode: tour.tourCode,
+            platformName,
+            quai: tour.quai,
+            horaire: tour.horaire,
+            partnerName: partner,
+            isNew: false,
+            isModified: false,
+          });
+          assignedIds.add(asgn.chauffeurId);
+        }
+        if (asgn.aideId && asgn.aide) {
+          const partner = asgn.chauffeur ? asgn.chauffeur.name : null;
+          assigned.push({
+            employeeId: asgn.aideId,
+            employeeName: asgn.aide.name,
+            email: asgn.aide.user?.email ?? null,
+            role: 'aide',
+            tourId: tour.id,
+            tourCode: tour.tourCode,
+            platformName,
+            quai: tour.quai,
+            horaire: tour.horaire,
+            partnerName: partner,
+            isNew: false,
+            isModified: false,
+          });
+          assignedIds.add(asgn.aideId);
+        }
+      }
+    }
+
+    const repos: Repos[] = activeEmployees
+      .filter((e) => !assignedIds.has(e.id))
+      .map((e) => ({
+        employeeId: e.id,
+        employeeName: e.name,
+        email: e.user?.email ?? null,
+        wasAssigned: false,
+        prevTourCode: null,
+      }));
+
+    let isDirty = false;
+    if (validation) {
+      const snapshot =
+        (validation.snapshot as Array<{
+          employeeId: string;
+          role: string;
+          tourId: string;
+          tourCode: string;
+        }>) ?? [];
+
+      for (const item of assigned) {
+        const snap = snapshot.find((s) => s.employeeId === item.employeeId);
+        if (!snap) {
+          item.isNew = true;
+          isDirty = true;
+        } else if (snap.tourId !== item.tourId || snap.role !== item.role) {
+          item.isModified = true;
+          isDirty = true;
+        }
+      }
+
+      for (const r of repos) {
+        const snap = snapshot.find((s) => s.employeeId === r.employeeId);
+        if (snap) {
+          r.wasAssigned = true;
+          r.prevTourCode = snap.tourCode;
+          isDirty = true;
+        }
+      }
+
+      // Also dirty if snapshot has IDs not in current (same as wasAssigned check above)
+    }
+
+    return {
+      date,
+      validation: validation ? { id: validation.id, validatedAt: validation.validatedAt } : null,
+      isDirty,
+      assigned,
+      repos,
+    };
+  }
+
+  async validateDay(date: string, dto: ValidateDayDto, userId: string) {
+    const preview = await this.getValidationPreview(date);
+    const selectedIds = new Set(dto.employeeIdsToNotify);
+    const isFirstValidation = preview.validation === null;
 
     const sends: Promise<void>[] = [];
 
-    if (assignment.chauffeurId) {
-      const chauffeur = await this.prisma.employee.findUnique({
-        where: { id: assignment.chauffeurId },
-        include: { user: { select: { email: true } } },
-      });
-      if (chauffeur?.user?.email) {
-        sends.push(
-          this.mailService.sendAssignmentNotification({
-            to: chauffeur.user.email,
-            employeeName: chauffeur.name,
-            role: 'chauffeur',
-            partnerName: assignment.aide?.name ?? null,
-            ...common,
-          }),
-        );
+    for (const emp of preview.assigned) {
+      if (!selectedIds.has(emp.employeeId) || !emp.email) continue;
+
+      let emailType: 'assigned' | 'modified';
+      if (isFirstValidation || emp.isNew) {
+        emailType = 'assigned';
+      } else if (emp.isModified) {
+        emailType = 'modified';
+      } else {
+        emailType = 'assigned';
       }
+
+      sends.push(
+        this.mailService.sendDayValidationEmail({
+          to: emp.email,
+          employeeName: emp.employeeName,
+          emailType,
+          date: new Date(date + 'T00:00:00.000Z'),
+          tourCode: emp.tourCode,
+          platformName: emp.platformName ?? undefined,
+          quai: emp.quai,
+          horaire: emp.horaire,
+          role: emp.role,
+          partnerName: emp.partnerName,
+        }),
+      );
     }
 
-    if (assignment.aideId) {
-      const aide = await this.prisma.employee.findUnique({
-        where: { id: assignment.aideId },
-        include: { user: { select: { email: true } } },
-      });
-      if (aide?.user?.email) {
-        sends.push(
-          this.mailService.sendAssignmentNotification({
-            to: aide.user.email,
-            employeeName: aide.name,
-            role: 'aide',
-            partnerName: assignment.chauffeur?.name ?? null,
-            ...common,
-          }),
-        );
-      }
+    for (const emp of preview.repos) {
+      if (!selectedIds.has(emp.employeeId) || !emp.email) continue;
+
+      const emailType = emp.wasAssigned ? 'unassigned' : 'repos';
+      sends.push(
+        this.mailService.sendDayValidationEmail({
+          to: emp.email,
+          employeeName: emp.employeeName,
+          emailType,
+          date: new Date(date + 'T00:00:00.000Z'),
+          tourCode: emp.wasAssigned ? (emp.prevTourCode ?? undefined) : undefined,
+        }),
+      );
     }
 
-    await Promise.all(sends);
+    // Send emails fire-and-forget so the API responds fast
+    Promise.all(sends).catch((err: Error) =>
+      this.logger.error('Day validation email failed', err.message),
+    );
+
+    const snapshot = preview.assigned.map((a) => ({
+      employeeId: a.employeeId,
+      employeeName: a.employeeName,
+      role: a.role,
+      tourId: a.tourId,
+      tourCode: a.tourCode,
+    }));
+
+    const d = new Date(date + 'T00:00:00.000Z');
+
+    const validation = await this.prisma.dayValidation.upsert({
+      where: { date: d },
+      update: { validatedAt: new Date(), validatedById: userId, snapshot },
+      create: { date: d, validatedById: userId, snapshot },
+    });
+
+    return validation;
   }
 }

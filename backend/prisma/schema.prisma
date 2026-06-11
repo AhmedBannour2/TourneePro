@@ -145,6 +145,7 @@ model User {
   uploadedTruckDocuments   TruckDocument[]
   notifications            Notification[]
   deviceTokens             DeviceToken[]
+  dayValidations           DayValidation[]
 
   @@map("users")
 }
@@ -297,6 +298,7 @@ model Assignment {
   aideId      String?   @map("aide_id")
   truckId     String?   @map("truck_id")
   assignedAt      DateTime  @default(now()) @map("assigned_at")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
   chauffeurSeenAt DateTime? @map("chauffeur_seen_at")
   aideSeenAt      DateTime? @map("aide_seen_at")
 
@@ -307,6 +309,18 @@ model Assignment {
 
   @@index([tourId])
   @@map("assignments")
+}
+
+model DayValidation {
+  id            String   @id @default(uuid())
+  date          DateTime @unique @db.Date
+  validatedAt   DateTime @default(now()) @map("validated_at")
+  validatedById String   @map("validated_by_id")
+  snapshot      Json
+
+  validatedBy User @relation(fields: [validatedById], references: [id])
+
+  @@map("day_validations")
 }
 
 model ExpressDelivery {
@@ -353,6 +367,7 @@ model TourConfirmation {
   delivered     Int
   absent        Int
   nonConform    Int      @map("non_conform")
+  d3e           Int?
   notes         String?
   confirmedAt   DateTime @default(now()) @map("confirmed_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
