@@ -777,12 +777,12 @@ function ValidationModal({ dateKey, onClose, onValidated }: {
     if (!p.validation) {
       // First time: all checked
       p.assigned.forEach(e => s.add(e.employeeId));
-      p.express.forEach(e => s.add(e.employeeId));
+      (p.express || []).forEach(e => s.add(e.employeeId));
       p.repos.forEach(e => s.add(e.employeeId));
     } else {
       // Re-validation: only delta checked by default; express always checked
       p.assigned.filter(e => e.isNew || e.isModified).forEach(e => s.add(e.employeeId));
-      p.express.forEach(e => s.add(e.employeeId));
+      (p.express || []).forEach(e => s.add(e.employeeId));
       p.repos.filter(e => e.wasAssigned).forEach(e => s.add(e.employeeId));
     }
     return s;
@@ -896,13 +896,13 @@ function ValidationModal({ dateKey, onClose, onValidated }: {
                 )}
 
                 {/* Express employees */}
-                {preview.express.length > 0 && (
+                {(preview.express || []).length > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                      Express ({preview.express.length})
+                      Express ({(preview.express || []).length})
                     </p>
                     <div className="space-y-1">
-                      {preview.express.map(emp => (
+                      {(preview.express || []).map(emp => (
                         <label key={emp.employeeId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors
                           ${checked.has(emp.employeeId) ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
                           <input
