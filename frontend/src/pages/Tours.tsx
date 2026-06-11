@@ -743,11 +743,16 @@ interface ValidationPreviewRepos {
   employeeId: string; employeeName: string; email: string | null;
   wasAssigned: boolean; prevTourCode: string | null;
 }
+interface ValidationPreviewExpress {
+  employeeId: string; employeeName: string; email: string | null;
+  expressType: string; expressId: string;
+}
 interface ValidationPreview {
   date: string;
   validation: { id: string; validatedAt: string } | null;
   isDirty: boolean;
   assigned: ValidationPreviewAssigned[];
+  express: ValidationPreviewExpress[];
   repos: ValidationPreviewRepos[];
 }
 
@@ -772,10 +777,12 @@ function ValidationModal({ dateKey, onClose, onValidated }: {
     if (!p.validation) {
       // First time: all checked
       p.assigned.forEach(e => s.add(e.employeeId));
+      p.express.forEach(e => s.add(e.employeeId));
       p.repos.forEach(e => s.add(e.employeeId));
     } else {
-      // Re-validation: only delta checked by default
+      // Re-validation: only delta checked by default; express always checked
       p.assigned.filter(e => e.isNew || e.isModified).forEach(e => s.add(e.employeeId));
+      p.express.forEach(e => s.add(e.employeeId));
       p.repos.filter(e => e.wasAssigned).forEach(e => s.add(e.employeeId));
     }
     return s;
@@ -880,6 +887,37 @@ function ValidationModal({ dateKey, onClose, onValidated }: {
                             <p className="text-xs text-gray-500 truncate">
                               Tournée <strong>{emp.tourCode}</strong>{emp.platformName ? ` · ${emp.platformName}` : ''}{emp.horaire ? ` · ${emp.horaire}` : ''}
                             </p>
+                            {!emp.email && <p className="text-[10px] text-red-500">Pas d'email configuré</p>}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Express employees */}
+                {preview.express.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      Express ({preview.express.length})
+                    </p>
+                    <div className="space-y-1">
+                      {preview.express.map(emp => (
+                        <label key={emp.employeeId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors
+                          ${checked.has(emp.employeeId) ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked.has(emp.employeeId)}
+                            onChange={() => toggle(emp.employeeId)}
+                            className="w-4 h-4 rounded text-amber-600 border-gray-300"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-sm text-gray-900 truncate">{emp.employeeName}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                                ⚡ {emp.expressType === 'GV' ? 'Express GV' : 'Express'}
+                              </span>
+                            </div>
                             {!emp.email && <p className="text-[10px] text-red-500">Pas d'email configuré</p>}
                           </div>
                         </label>
