@@ -563,8 +563,8 @@ export class ToursService {
       throw new ForbiddenException('You are not assigned to this tour');
     }
 
-    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    if (dto.delivered + dto.absent > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent exceeds total clients');
     }
 
     const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
@@ -615,8 +615,8 @@ export class ToursService {
     const employeeId = assignment.chauffeurId ?? assignment.aideId;
     if (!employeeId) throw new BadRequestException('No employee is linked to this assignment');
 
-    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    if (dto.delivered + dto.absent > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent exceeds total clients');
     }
 
     const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
@@ -650,8 +650,8 @@ export class ToursService {
     const confirmation = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
     if (!confirmation) throw new NotFoundException('No confirmation found for this tour');
 
-    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    if (dto.delivered + dto.absent > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent exceeds total clients');
     }
 
     const updated = await this.prisma.tourConfirmation.update({
@@ -681,8 +681,8 @@ export class ToursService {
       throw new ForbiddenException('You did not submit this confirmation');
     }
 
-    if (dto.delivered + dto.absent + dto.nonConform > dto.totalClients) {
-      throw new BadRequestException('Delivered + absent + non-conform exceeds total clients');
+    if (dto.delivered + dto.absent > dto.totalClients) {
+      throw new BadRequestException('Delivered + absent exceeds total clients');
     }
 
     const updated = await this.prisma.tourConfirmation.update({
