@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/useToast';
 
 interface TourConfirmation {
   id: string; tourId: string; confirmedById: string;
-  totalClients: number; delivered: number; absent: number; nonConform: number;
+  totalClients: number; delivered: number; absent: number; nonConform: number; d3e: number | null;
   notes: string | null; confirmedAt: string; updatedAt: string;
   confirmedBy: { id: string; name: string };
 }

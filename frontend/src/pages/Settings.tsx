@@ -274,10 +274,9 @@ function MailConfigCard() {
   const [showKey, setShowKey] = useState(false);
   const [saveMsg, setSaveMsg] = useState({ ok: false, msg: '' });
   const [testMsg, setTestMsg] = useState({ ok: false, msg: '' });
-  const [testLoading, setTestLoading] = useState(false);
 
   // Fetch current config
-  const { data: config, isLoading: configLoading } = useQuery({
+  const { isLoading: configLoading } = useQuery({
     queryKey: ['resend-config'],
     queryFn: () => api.get('/settings/mail').then((r) => r.data),
     onSuccess: (data: any) => {
