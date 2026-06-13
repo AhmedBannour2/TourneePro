@@ -1,21 +1,15 @@
-import { IsString, IsNumber, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsEmail, IsOptional } from 'class-validator';
 
 export class MailConfigDto {
   @IsString()
-  host!: string;
-
-  @IsNumber()
-  @Type(() => Number)
-  port!: number;
-
-  @IsString()
-  user!: string;
+  @IsOptional()
+  resendApiKey?: string;
 
   @IsString()
   @IsOptional()
-  pass?: string;
+  from?: string;
 
-  @IsString()
-  from!: string;
+  @IsEmail()
+  @IsOptional()
+  testRecipient?: string;
 }

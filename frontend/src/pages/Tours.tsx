@@ -433,8 +433,8 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
 
   const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
   const total = n(f.totalClients);
-  const sum   = n(f.delivered) + n(f.absent) + n(f.nonConform);
-  const valid = total > 0 && sum <= total;
+  const sum   = n(f.delivered) + n(f.absent);
+  const valid = total > 0 && sum <= total && f.d3e !== '';
 
   const mut = useMutation({
     mutationFn: (body: object) =>
@@ -484,7 +484,7 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
             </div>
             {total > 0 && (
               <div className={`text-sm font-medium rounded-lg px-3 py-2 flex justify-between border ${sum <= total ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                <span>{n(f.delivered)} + {n(f.absent)} + {n(f.nonConform)} = {sum}</span>
+                <span>{n(f.delivered)} + {n(f.absent)} = {sum}</span>
                 <span>/ Total : {total}</span>
               </div>
             )}

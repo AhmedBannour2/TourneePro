@@ -57,18 +57,26 @@ export class SettingsController {
   @Post('mail/test')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Send a test email to the current admin account' })
+  @ApiOperation({ summary: 'Send a test email via Resend to the configured test recipient' })
   async testMail(@Request() req: any) {
     try {
+      // Get configured test recipient or fallback to current user's email
+      const testRecipient = await this.settingsService.getTestRecipient();
+      const recipient = testRecipient || req.user?.email;
+
+      if (!recipient) {
+        throw new Error('Aucune adresse email de test configurée');
+      }
+
       await this.mailService.sendRaw({
-        to: req.user.email,
-        subject: 'TourneePro — Test SMTP ✅',
-        text: 'La configuration mail fonctionne correctement. Cet email a été envoyé depuis noreply@tournee.pro via Railway.',
+        to: recipient,
+        subject: 'TourneePro — Test Resend ✅',
+        text: "La configuration email (Resend) fonctionne correctement. Cet email a été envoyé via l'API Resend.",
       });
-      return { sent: true, to: req.user.email };
+      return { sent: true, to: recipient };
     } catch (err: any) {
       throw new HttpException(
-        { sent: false, error: err.message ?? 'SMTP error' },
+        { sent: false, error: err.message ?? 'Erreur Resend' },
         HttpStatus.BAD_GATEWAY,
       );
     }

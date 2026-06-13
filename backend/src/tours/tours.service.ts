@@ -823,7 +823,7 @@ export class ToursService {
     const dayEnd = new Date(d);
     dayEnd.setUTCHours(23, 59, 59, 999);
 
-    const [tours, activeEmployees, validation] = await Promise.all([
+    const [tours, activeEmployees, validation, expressAssignments] = await Promise.all([
       this.prisma.tour.findMany({
         where: { date: { gte: dayStart, lte: dayEnd } },
         include: {
@@ -842,6 +842,18 @@ export class ToursService {
         orderBy: { name: 'asc' },
       }),
       this.prisma.dayValidation.findUnique({ where: { date: d } }),
+      this.prisma.expressAssignment.findMany({
+        where: {
+          expressDelivery: {
+            date: { gte: dayStart, lte: dayEnd },
+            status: { not: 'CANCELLED' },
+          },
+        },
+        include: {
+          employee: { include: { user: { select: { email: true } } } },
+          expressDelivery: { select: { id: true, type: true } },
+        },
+      }),
     ]);
 
     type Assigned = {
@@ -857,6 +869,13 @@ export class ToursService {
       partnerName: string | null;
       isNew: boolean;
       isModified: boolean;
+    };
+    type Express = {
+      employeeId: string;
+      employeeName: string;
+      email: string | null;
+      expressType: string;
+      expressId: string;
     };
     type Repos = {
       employeeId: string;
@@ -911,8 +930,24 @@ export class ToursService {
       }
     }
 
+    // Build express list — deduplicate by employeeId (one employee may have multiple express)
+    const expressMap = new Map<string, Express>();
+    for (const ea of expressAssignments) {
+      if (!expressMap.has(ea.employeeId)) {
+        expressMap.set(ea.employeeId, {
+          employeeId: ea.employeeId,
+          employeeName: ea.employee.name,
+          email: ea.employee.user?.email ?? null,
+          expressType: ea.expressDelivery.type,
+          expressId: ea.expressDelivery.id,
+        });
+      }
+    }
+    const express: Express[] = Array.from(expressMap.values());
+    const expressIds = new Set(express.map((e) => e.employeeId));
+
     const repos: Repos[] = activeEmployees
-      .filter((e) => !assignedIds.has(e.id))
+      .filter((e) => !assignedIds.has(e.id) && !expressIds.has(e.id))
       .map((e) => ({
         employeeId: e.id,
         employeeName: e.name,
@@ -959,6 +994,7 @@ export class ToursService {
       validation: validation ? { id: validation.id, validatedAt: validation.validatedAt } : null,
       isDirty,
       assigned,
+      express,
       repos,
     };
   }
@@ -994,6 +1030,20 @@ export class ToursService {
           horaire: emp.horaire,
           role: emp.role,
           partnerName: emp.partnerName,
+        }),
+      );
+    }
+
+    for (const emp of preview.express) {
+      if (!selectedIds.has(emp.employeeId) || !emp.email) continue;
+
+      sends.push(
+        this.mailService.sendDayValidationEmail({
+          to: emp.email,
+          employeeName: emp.employeeName,
+          emailType: 'express',
+          date: new Date(date + 'T00:00:00.000Z'),
+          expressType: emp.expressType,
         }),
       );
     }

@@ -173,7 +173,7 @@ export class MailService {
   async sendDayValidationEmail(params: {
     to: string;
     employeeName: string;
-    emailType: 'assigned' | 'repos' | 'unassigned' | 'modified';
+    emailType: 'assigned' | 'repos' | 'unassigned' | 'modified' | 'express';
     date: Date;
     tourCode?: string;
     platformName?: string;
@@ -181,6 +181,7 @@ export class MailService {
     horaire?: string | null;
     role?: 'chauffeur' | 'aide';
     partnerName?: string | null;
+    expressType?: string;
   }): Promise<void> {
     const firstName = params.employeeName.split(' ')[0];
     const dateStr = this.formatDate(params.date);
@@ -233,6 +234,17 @@ export class MailService {
         headline: `Votre mission du ${dateStr} a été modifiée`,
         badgeLabel: 'Modifié(e)',
         body: `Les détails de votre tournée <strong>${params.tourCode}</strong> du <strong>${dateStr}</strong> ont été mis à jour.`,
+      },
+      express: {
+        subject: `Livraison express — ${shortDate}`,
+        accentColor: '#d97706',
+        lightBg: '#fffbeb',
+        lightBorder: '#fde68a',
+        accentText: '#92400e',
+        icon: '⚡',
+        headline: `Vous avez une livraison express le ${dateStr}`,
+        badgeLabel: params.expressType === 'GV' ? 'Express GV' : 'Express Standard',
+        body: `Vous êtes assigné(e) à une livraison express le <strong>${dateStr}</strong>. Retrouvez les détails directement sur TourneePro.`,
       },
     };
 

@@ -79,11 +79,11 @@ const EXPRESS_TYPE_CONFIG: Record<ExpressType, { label: string; cls: string }> =
 
 // ── Confirm modal (tours) ──────────────────────────────────────────────────────
 
-interface Fields { totalClients: string; delivered: string; absent: string; nonConform: string; notes: string }
-const EMPTY: Fields = { totalClients: '', delivered: '', absent: '', nonConform: '', notes: '' };
+interface Fields { totalClients: string; delivered: string; absent: string; nonConform: string; d3e: string; notes: string }
+const EMPTY: Fields = { totalClients: '', delivered: '', absent: '', nonConform: '', d3e: '', notes: '' };
 const fromConf = (c: TourConfirmation): Fields => ({
   totalClients: String(c.totalClients), delivered: String(c.delivered),
-  absent: String(c.absent), nonConform: String(c.nonConform), notes: c.notes ?? '',
+  absent: String(c.absent), nonConform: String(c.nonConform), d3e: c.d3e != null ? String(c.d3e) : '', notes: c.notes ?? '',
 });
 
 function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () => void; onSaved: () => void }) {
@@ -93,8 +93,9 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
 
   const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
   const total = n(f.totalClients);
-  const sum   = n(f.delivered) + n(f.absent) + n(f.nonConform);
-  const valid = total > 0 && sum <= total;
+  const sum   = n(f.delivered) + n(f.absent);
+  const hasD3E = f.d3e !== '';
+  const valid = total > 0 && sum <= total && hasD3E;
   const sumOk = total > 0 && sum <= total;
 
   const mut = useMutation({
@@ -143,10 +144,15 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
             </div>
             {total > 0 && (
               <div className={`text-sm font-medium rounded-lg px-3 py-2 flex justify-between border ${sumOk ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                <span>{n(f.delivered)} + {n(f.absent)} + {n(f.nonConform)} = {sum}</span>
+                <span>{n(f.delivered)} + {n(f.absent)} = {sum}</span>
                 <span>/ Total: {total}</span>
               </div>
             )}
+            <div>
+              <Label>D3E (appareils repris) <span className="text-red-500">*</span></Label>
+              <Input type="number" min="0" value={f.d3e} onChange={set('d3e')} placeholder="0" className="mt-1" />
+              {!hasD3E && f.d3e !== '' && <p className="text-xs text-red-600 mt-1">D3E requis</p>}
+            </div>
             <div>
               <Label>Notes (optionnel)</Label>
               <textarea value={f.notes} onChange={set('notes')} placeholder="Observations..."
@@ -156,7 +162,7 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
 
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>Annuler</Button>
-            <Button onClick={() => mut.mutate({ totalClients: n(f.totalClients), delivered: n(f.delivered), absent: n(f.absent), nonConform: n(f.nonConform), notes: f.notes || undefined })}
+            <Button onClick={() => mut.mutate({ totalClients: n(f.totalClients), delivered: n(f.delivered), absent: n(f.absent), nonConform: n(f.nonConform), d3e: n(f.d3e), notes: f.notes || undefined })}
               disabled={!valid || mut.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
               {mut.isPending ? 'Enregistrement...' : isEdit ? 'Mettre à jour' : 'Confirmer'}
             </Button>

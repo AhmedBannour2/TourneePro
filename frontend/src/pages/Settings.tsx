@@ -174,15 +174,15 @@ function GoogleSheetsCard() {
   });
 
   return (
-    <Card className="p-6 space-y-4">
-      <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+    <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+      <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
         <RefreshCw className="w-4 h-4 text-gray-500" /> Synchronisation Google Sheets
       </h2>
 
       {/* Info */}
-      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
-        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        <span>
+      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 sm:px-3 py-2">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 flex-shrink-0" />
+        <span className="text-xs">
           Connectez le compte Google qui a accès aux feuilles Boulanger. Seul un token de lecture
           est stocké — jamais votre mot de passe. Vous pouvez changer de compte à tout moment.
         </span>
@@ -227,8 +227,8 @@ function GoogleSheetsCard() {
       )}
 
       {/* Sheet URLs */}
-      <div className="space-y-3 pt-2 border-t">
-        <h3 className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+      <div className="space-y-2 sm:space-y-3 pt-2 sm:pt-3 border-t">
+        <h3 className="text-xs sm:text-sm font-medium text-gray-700 flex items-center gap-1.5">
           <Link className="w-3.5 h-3.5 text-gray-400" /> Liens des feuilles Boulanger
         </h3>
         <div className="space-y-2">
@@ -256,6 +256,7 @@ function GoogleSheetsCard() {
           size="sm"
           onClick={() => { setUrlMsg({ ok: false, msg: '' }); saveUrlsMutation.mutate(); }}
           disabled={saveUrlsMutation.isPending || (!sheet1 && !sheet2)}
+          className="w-full sm:w-auto text-xs"
         >
           {saveUrlsMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer les liens'}
         </Button>
@@ -264,83 +265,168 @@ function GoogleSheetsCard() {
   );
 }
 
-// ── Mail Config Card ───────────────────────────────────────────────────────────
+// ── Mail Config Card (Resend) ─────────────────────────────────────────────────
 
 function MailConfigCard() {
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('587');
-  const [user, setUser] = useState('');
-  const [pass, setPass] = useState('');
   const [from, setFrom] = useState('');
-  const [msg, setMsg] = useState({ ok: false, msg: '' });
-  const [testMsg] = useState({ ok: false, msg: '' });
+  const [apiKey, setApiKey] = useState('');
+  const [testRecipient, setTestRecipient] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [saveMsg, setSaveMsg] = useState({ ok: false, msg: '' });
+  const [testMsg, setTestMsg] = useState({ ok: false, msg: '' });
+  const [testLoading, setTestLoading] = useState(false);
 
-  useQuery({
-    queryKey: ['mail-config'],
+  // Fetch current config
+  const { data: config, isLoading: configLoading } = useQuery({
+    queryKey: ['resend-config'],
     queryFn: () => api.get('/settings/mail').then((r) => r.data),
     onSuccess: (data: any) => {
-      if (data.host) setHost(data.host);
-      if (data.port) setPort(String(data.port));
-      if (data.user) setUser(data.user);
-      if (data.pass) setPass(data.pass);
       if (data.from) setFrom(data.from);
+      if (data.resendApiKey) setApiKey(data.resendApiKey);
+      if (data.testRecipient) setTestRecipient(data.testRecipient);
     },
   } as any);
 
+  // Save config
   const saveMutation = useMutation({
-    mutationFn: () => api.post('/settings/mail', { host, port: Number(port), user, pass, from }),
-    onSuccess: () => setMsg({ ok: true, msg: 'Configuration email enregistrée.' }),
-    onError: (err: any) => setMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur.' }),
+    mutationFn: () => api.post('/settings/mail', { from, resendApiKey: apiKey, testRecipient }),
+    onSuccess: () => setSaveMsg({ ok: true, msg: 'Configuration Resend enregistrée.' }),
+    onError: (err: any) => setSaveMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur.' }),
   });
 
+  // Test email
+  const testMutation = useMutation({
+    mutationFn: () => api.post('/settings/mail/test', {}),
+    onSuccess: (data: any) => {
+      const emailTo = data.to || testRecipient || 'unknown';
+      setTestMsg({ ok: true, msg: `Email de test envoyé à ${emailTo} ✓` });
+    },
+    onError: (err: any) => setTestMsg({ ok: false, msg: err?.response?.data?.message || 'Erreur envoi email.' }),
+  });
+
+  const hasApiKey = !!apiKey && apiKey.length > 0;
+  const hasTestRecipient = !!testRecipient && testRecipient.trim().length > 0;
+
   return (
-    <Card className="p-6 space-y-4">
-      <h2 className="font-semibold text-gray-800 flex items-center gap-2">
-        <Mail className="w-4 h-4 text-gray-500" /> Configuration email (SMTP)
+    <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+      <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
+        <Mail className="w-4 h-4 text-gray-500" /> Configuration Resend
       </h2>
 
-      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
-        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        <span>
-          Pour Gmail : host = <strong>smtp.gmail.com</strong>, port = <strong>587</strong>.
-          Activez la validation en 2 étapes sur votre compte Google puis créez un
-          "Mot de passe d'application" sur <strong>myaccount.google.com/security</strong> — utilisez ce code de 16 caractères ici, pas votre vrai mot de passe.
+      {/* Info Box */}
+      <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 sm:px-3 py-2">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 flex-shrink-0" />
+        <span className="text-xs">
+          TourneePro utilise <strong>Resend</strong> pour envoyer les emails (notifications de tournées, contrôles techniques, etc.).
+          Configurez votre clé API Resend et l'adresse expéditeur ci-dessous.
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">Serveur SMTP</Label>
-          <Input placeholder="smtp.gmail.com" value={host} onChange={(e) => setHost(e.target.value)} />
+      {/* Status Badge */}
+      {!configLoading && (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${
+          hasApiKey
+            ? 'bg-green-50 text-green-800 border border-green-200'
+            : 'bg-amber-50 text-amber-800 border border-amber-200'
+        }`}>
+          <div className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-600' : 'bg-amber-600'}`} />
+          {hasApiKey ? 'Resend configuré ✓' : 'Resend non configuré'}
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Port</Label>
-          <Input type="number" placeholder="587" value={port} onChange={(e) => setPort(e.target.value)} />
+      )}
+
+      {/* API Key Field */}
+      <div className="space-y-1">
+        <Label htmlFor="resend-key" className="text-xs sm:text-sm">Clé API Resend <span className="text-red-500">*</span></Label>
+        <div className="relative">
+          <Input
+            id="resend-key"
+            type={showKey ? 'text' : 'password'}
+            placeholder="re_xxxxxxxxxxxxx"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className="text-sm pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowKey(!showKey)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-xs"
+          >
+            {showKey ? '🙈' : '👁'}
+          </button>
         </div>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Adresse email</Label>
-        <Input type="email" placeholder="notifications@stp.fr" value={user} onChange={(e) => setUser(e.target.value)} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Mot de passe / App Password</Label>
-        <Input type="password" placeholder="••••••••••••••••" value={pass} onChange={(e) => setPass(e.target.value)} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Adresse expéditeur (From)</Label>
-        <Input type="email" placeholder="noreply@stp.fr" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <p className="text-xs text-gray-500">
+          Trouvez votre clé API sur <strong>resend.com/api-keys</strong>
+        </p>
       </div>
 
-      <Feedback ok={msg.ok} msg={msg.msg} />
+      {/* From Address Field */}
+      <div className="space-y-1">
+        <Label htmlFor="mail-from" className="text-xs sm:text-sm">Adresse expéditeur (From)</Label>
+        <Input
+          id="mail-from"
+          type="email"
+          placeholder="noreply@tournee.pro"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="text-sm"
+        />
+        <p className="text-xs text-gray-500">
+          Format : <strong>Nom &lt;email@domain.com&gt;</strong> ou simplement l'email
+        </p>
+      </div>
+
+      {/* Test Email Recipient Field */}
+      <div className="space-y-1">
+        <Label htmlFor="test-recipient" className="text-xs sm:text-sm">Email de test (destinataire)</Label>
+        <Input
+          id="test-recipient"
+          type="email"
+          placeholder="votre.email@example.com"
+          value={testRecipient}
+          onChange={(e) => setTestRecipient(e.target.value)}
+          className="text-sm"
+        />
+        <p className="text-xs text-gray-500">
+          L'adresse qui recevra les emails de test (optionnel)
+        </p>
+      </div>
+
+      {/* Messages */}
+      <Feedback ok={saveMsg.ok} msg={saveMsg.msg} />
       <Feedback ok={testMsg.ok} msg={testMsg.msg} />
 
-      <Button
-        size="sm"
-        onClick={() => { setMsg({ ok: false, msg: '' }); saveMutation.mutate(); }}
-        disabled={saveMutation.isPending}
-      >
-        {saveMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer'}
-      </Button>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button
+          size="sm"
+          onClick={() => { setSaveMsg({ ok: false, msg: '' }); saveMutation.mutate(); }}
+          disabled={saveMutation.isPending || !apiKey.trim()}
+          className="w-full sm:w-auto text-xs"
+        >
+          {saveMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => { setTestMsg({ ok: false, msg: '' }); testMutation.mutate(); }}
+          disabled={testMutation.isPending || !hasApiKey || !hasTestRecipient}
+          className="w-full sm:w-auto text-xs"
+        >
+          {testMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</> : '📧 Email de test'}
+        </Button>
+      </div>
+
+      {/* Help Box */}
+      <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 space-y-1">
+        <p className="font-medium text-gray-700">Comment configurer :</p>
+        <ul className="list-disc list-inside space-y-0.5 text-gray-600">
+          <li>Créez un compte <strong>resend.com</strong></li>
+          <li>Générez une clé API dans les paramètres</li>
+          <li>Vérifiez votre domaine (OVH DNS)</li>
+          <li>Collez la clé API ci-dessus</li>
+          <li>Testez avec le bouton "Email de test"</li>
+        </ul>
+      </div>
     </Card>
   );
 }
@@ -402,10 +488,10 @@ function ImportCard() {
   };
 
   return (
-    <Card className="p-6 space-y-4">
+    <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
       <div className="flex items-center gap-2">
-        <FileSpreadsheet className="w-5 h-5 text-gray-500" />
-        <h2 className="font-semibold text-gray-800">Import manuel (backup)</h2>
+        <FileSpreadsheet className="w-4 sm:w-5 h-4 sm:h-5 text-gray-500" />
+        <h2 className="font-semibold text-gray-800 text-sm sm:text-base">Import manuel (backup)</h2>
       </div>
       <p className="text-xs text-gray-500">
         Utilisez cette option si la synchronisation Google Sheets n'est pas disponible.
@@ -421,12 +507,12 @@ function ImportCard() {
           if (f) handleFile(f);
         }}
         onClick={() => inputRef.current?.click()}
-        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+        className={`border-2 border-dashed rounded-lg p-4 sm:p-8 text-center cursor-pointer transition-colors ${
           isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
         }`}
       >
-        <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-        <p className="text-sm text-gray-600">Glisser un fichier Excel ici</p>
+        <Upload className="w-6 sm:w-8 h-6 sm:h-8 mx-auto mb-2 text-gray-400" />
+        <p className="text-xs sm:text-sm text-gray-600">Glisser un fichier Excel ici</p>
         <p className="text-xs text-gray-400 mt-1">ou cliquer pour choisir (.xlsx, .xls)</p>
         <input
           ref={inputRef}
@@ -438,7 +524,7 @@ function ImportCard() {
       </div>
 
       {uploadMutation.isPending && (
-        <div className="flex items-center gap-2 text-sm text-blue-600">
+        <div className="flex items-center gap-2 text-xs sm:text-sm text-blue-600">
           <Loader2 className="w-4 h-4 animate-spin" /> Chargement du fichier…
         </div>
       )}
@@ -683,8 +769,14 @@ export default function Settings() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="w-full max-w-2xl space-y-4 md:space-y-6">
-      <h1 className="text-2xl font-bold">Paramètres</h1>
+    <div className="w-full">
+      {/* Page Header */}
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Paramètres</h1>
+        <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
+          {isEmployee ? 'Gérez votre profil, vos documents et votre sécurité.' : 'Configurez les paramètres de l\'application, intégrations et tarifs.'}
+        </p>
+      </div>
 
       {isEmployee ? (
         /* ── Employee: full settings ──────────────────────────────────────── */
@@ -709,22 +801,22 @@ export default function Settings() {
                   {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
                 </div>
               ) : (
-                <form onSubmit={handleProfile(onProfileSubmit)} className="space-y-5">
-                  <h2 className="font-semibold text-gray-800">Informations personnelles</h2>
+                <form onSubmit={handleProfile(onProfileSubmit)} className="space-y-4 sm:space-y-5">
+                  <h2 className="font-semibold text-gray-800 text-sm sm:text-base">Informations personnelles</h2>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="space-y-1">
-                      <Label htmlFor="s-fn">Prénom <span className="text-red-500">*</span></Label>
+                      <Label htmlFor="s-fn" className="text-xs sm:text-sm">Prénom <span className="text-red-500">*</span></Label>
                       <Input id="s-fn" {...regProfile('firstName')}
-                        className={profileErrors.firstName ? 'border-red-500' : ''} />
+                        className={`text-sm ${profileErrors.firstName ? 'border-red-500' : ''}`} />
                       {profileErrors.firstName && (
                         <p className="text-xs text-red-600">{profileErrors.firstName.message}</p>
                       )}
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="s-ln">Nom <span className="text-red-500">*</span></Label>
+                      <Label htmlFor="s-ln" className="text-xs sm:text-sm">Nom <span className="text-red-500">*</span></Label>
                       <Input id="s-ln" {...regProfile('lastName')}
-                        className={profileErrors.lastName ? 'border-red-500' : ''} />
+                        className={`text-sm ${profileErrors.lastName ? 'border-red-500' : ''}`} />
                       {profileErrors.lastName && (
                         <p className="text-xs text-red-600">{profileErrors.lastName.message}</p>
                       )}
@@ -732,22 +824,22 @@ export default function Settings() {
                   </div>
 
                   <div className="space-y-1">
-                    <Label htmlFor="s-phone" className="flex items-center gap-1">
+                    <Label htmlFor="s-phone" className="text-xs sm:text-sm flex items-center gap-1">
                       <Phone className="w-3.5 h-3.5 text-gray-400" /> Téléphone
                     </Label>
-                    <Input id="s-phone" type="tel" {...regProfile('phone')} placeholder="+33 6 12 34 56 78" />
+                    <Input id="s-phone" type="tel" {...regProfile('phone')} placeholder="+33 6 12 34 56 78" className="text-sm" />
                   </div>
 
                   <div className="space-y-1">
-                    <Label htmlFor="s-addr" className="flex items-center gap-1">
+                    <Label htmlFor="s-addr" className="text-xs sm:text-sm flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5 text-gray-400" /> Adresse
                     </Label>
-                    <Input id="s-addr" {...regProfile('address')} placeholder="12 rue de la Paix, 75001 Paris" />
+                    <Input id="s-addr" {...regProfile('address')} placeholder="12 rue de la Paix, 75001 Paris" className="text-sm" />
                   </div>
 
                   <Feedback ok={profileMsg.ok} msg={profileMsg.msg} />
 
-                  <Button type="submit" disabled={profileLoading}>
+                  <Button type="submit" disabled={profileLoading} className="w-full sm:w-auto text-xs sm:text-sm">
                     {profileLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement…</> : 'Enregistrer'}
                   </Button>
                 </form>
@@ -757,28 +849,28 @@ export default function Settings() {
 
           {/* ── Security tab ───────────────────────────────────────────────── */}
           <TabsContent value="security">
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               {/* Change email */}
-              <Card className="p-6 space-y-4">
-                <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+                <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
                   <Mail className="w-4 h-4 text-gray-500" /> Changer d'adresse email
                 </h2>
-                <p className="text-sm text-gray-500">
+                <p className="text-xs sm:text-sm text-gray-500">
                   Email actuel : <strong>{user?.email}</strong>
                 </p>
-                <form onSubmit={handleEmail(onEmailSubmit)} className="space-y-3">
+                <form onSubmit={handleEmail(onEmailSubmit)} className="space-y-2 sm:space-y-3">
                   <div className="space-y-1">
-                    <Label htmlFor="e-curpwd">Mot de passe actuel</Label>
+                    <Label htmlFor="e-curpwd" className="text-xs sm:text-sm">Mot de passe actuel</Label>
                     <Input id="e-curpwd" type="password" {...regEmail('currentPassword')}
-                      className={emailErrors.currentPassword ? 'border-red-500' : ''} />
+                      className={`text-sm ${emailErrors.currentPassword ? 'border-red-500' : ''}`} />
                     {emailErrors.currentPassword && (
                       <p className="text-xs text-red-600">{emailErrors.currentPassword.message}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="e-newemail">Nouvel email</Label>
+                    <Label htmlFor="e-newemail" className="text-xs sm:text-sm">Nouvel email</Label>
                     <Input id="e-newemail" type="email" {...regEmail('newEmail')} placeholder="nouveau@stp.fr"
-                      className={emailErrors.newEmail ? 'border-red-500' : ''} />
+                      className={`text-sm ${emailErrors.newEmail ? 'border-red-500' : ''}`} />
                     {emailErrors.newEmail && (
                       <p className="text-xs text-red-600">{emailErrors.newEmail.message}</p>
                     )}
@@ -787,44 +879,44 @@ export default function Settings() {
                   <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                     Après modification, vous serez automatiquement déconnecté(e).
                   </p>
-                  <Button type="submit" variant="outline" disabled={emailLoading}>
+                  <Button type="submit" variant="outline" disabled={emailLoading} className="w-full sm:w-auto text-xs sm:text-sm">
                     {emailLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mise à jour…</> : 'Mettre à jour l\'email'}
                   </Button>
                 </form>
               </Card>
 
               {/* Change password */}
-              <Card className="p-6 space-y-4">
-                <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+                <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
                   <Lock className="w-4 h-4 text-gray-500" /> Changer de mot de passe
                 </h2>
-                <form onSubmit={handlePwd(onPasswordSubmit)} className="space-y-3">
+                <form onSubmit={handlePwd(onPasswordSubmit)} className="space-y-2 sm:space-y-3">
                   <div className="space-y-1">
-                    <Label htmlFor="p-cur">Mot de passe actuel</Label>
+                    <Label htmlFor="p-cur" className="text-xs sm:text-sm">Mot de passe actuel</Label>
                     <Input id="p-cur" type="password" {...regPwd('currentPassword')}
-                      className={pwdErrors.currentPassword ? 'border-red-500' : ''} />
+                      className={`text-sm ${pwdErrors.currentPassword ? 'border-red-500' : ''}`} />
                     {pwdErrors.currentPassword && (
                       <p className="text-xs text-red-600">{pwdErrors.currentPassword.message}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="p-new">Nouveau mot de passe</Label>
+                    <Label htmlFor="p-new" className="text-xs sm:text-sm">Nouveau mot de passe</Label>
                     <Input id="p-new" type="password" {...regPwd('newPassword')} placeholder="Min. 6 caractères"
-                      className={pwdErrors.newPassword ? 'border-red-500' : ''} />
+                      className={`text-sm ${pwdErrors.newPassword ? 'border-red-500' : ''}`} />
                     {pwdErrors.newPassword && (
                       <p className="text-xs text-red-600">{pwdErrors.newPassword.message}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="p-confirm">Confirmer le mot de passe</Label>
+                    <Label htmlFor="p-confirm" className="text-xs sm:text-sm">Confirmer le mot de passe</Label>
                     <Input id="p-confirm" type="password" {...regPwd('confirmPassword')}
-                      className={pwdErrors.confirmPassword ? 'border-red-500' : ''} />
+                      className={`text-sm ${pwdErrors.confirmPassword ? 'border-red-500' : ''}`} />
                     {pwdErrors.confirmPassword && (
                       <p className="text-xs text-red-600">{pwdErrors.confirmPassword.message}</p>
                     )}
                   </div>
                   <Feedback ok={pwdMsg.ok} msg={pwdMsg.msg} />
-                  <Button type="submit" disabled={pwdLoading}>
+                  <Button type="submit" disabled={pwdLoading} className="w-full sm:w-auto text-xs sm:text-sm">
                     {pwdLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mise à jour…</> : 'Changer le mot de passe'}
                   </Button>
                 </form>
@@ -834,17 +926,17 @@ export default function Settings() {
 
           {/* ── Documents tab ──────────────────────────────────────────────── */}
           <TabsContent value="documents">
-            <Card className="p-6 space-y-5">
+            <Card className="p-4 sm:p-6 space-y-4 sm:space-y-5">
               {/* Upload */}
               <div>
-                <h2 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <h2 className="font-semibold text-gray-800 text-sm sm:text-base mb-2 sm:mb-3 flex items-center gap-2">
                   <Upload className="w-4 h-4 text-gray-500" /> Ajouter un document
                 </h2>
-                <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-2 sm:mb-3">
                   <div className="space-y-1">
-                    <Label>Type</Label>
+                    <Label className="text-xs sm:text-sm">Type</Label>
                     <Select value={uploadFileType} onValueChange={setUploadFileType}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="text-xs sm:text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {DOC_TYPE_OPTIONS.map((t) => (
                           <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
@@ -853,10 +945,10 @@ export default function Settings() {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Fichier</Label>
+                    <Label className="text-xs sm:text-sm">Fichier</Label>
                     <Input
                       ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png"
-                      className="cursor-pointer"
+                      className="cursor-pointer text-xs sm:text-sm"
                       onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                     />
                   </div>
@@ -867,31 +959,31 @@ export default function Settings() {
                   </p>
                 )}
                 <Feedback ok={uploadMsg.ok} msg={uploadMsg.msg} />
-                <Button size="sm" className="mt-2" disabled={!uploadFile || isUploading} onClick={handleUpload}>
+                <Button size="sm" className="mt-2 w-full sm:w-auto text-xs" disabled={!uploadFile || isUploading} onClick={handleUpload}>
                   {isUploading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi…</> : <><Upload className="w-4 h-4 mr-2" />Envoyer</>}
                 </Button>
               </div>
 
               {/* Document list */}
-              <div className="border-t pt-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Mes documents</h3>
+              <div className="border-t pt-3 sm:pt-4">
+                <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">Mes documents</h3>
                 {docsLoading ? (
                   <div className="space-y-2">
                     {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
                   </div>
                 ) : !documents?.length ? (
-                  <div className="text-center py-8 text-gray-400">
-                    <FileText className="w-8 h-8 mx-auto mb-1 opacity-30" />
-                    <p className="text-sm">Aucun document</p>
+                  <div className="text-center py-6 sm:py-8 text-gray-400">
+                    <FileText className="w-6 sm:w-8 h-6 sm:h-8 mx-auto mb-1 opacity-30" />
+                    <p className="text-xs sm:text-sm">Aucun document</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {documents.map((doc) => (
-                      <div key={doc.id} className="flex items-center gap-3 border rounded-lg p-3 bg-gray-50">
-                        <FileText className="w-5 h-5 text-gray-400 shrink-0" />
+                      <div key={doc.id} className="flex items-center gap-2 sm:gap-3 border rounded-lg p-2 sm:p-3 bg-gray-50">
+                        <FileText className="w-4 sm:w-5 h-4 sm:h-5 text-gray-400 shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{doc.originalName}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-xs sm:text-sm font-medium truncate">{doc.originalName}</p>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <Badge className={`text-xs ${DOC_TYPE_COLORS[doc.fileType] ?? ''}`}>
                               {DOC_TYPE_OPTIONS.find((t) => t.value === doc.fileType)?.label ?? doc.fileType}
                             </Badge>
@@ -901,10 +993,10 @@ export default function Settings() {
                           </div>
                         </div>
                         <div className="flex gap-1 shrink-0">
-                          <Button variant="ghost" size="sm" title="Télécharger" onClick={() => handleDownload(doc)}>
+                          <Button variant="ghost" size="sm" title="Télécharger" onClick={() => handleDownload(doc)} className="p-1">
                             <Download className="w-4 h-4 text-indigo-600" />
                           </Button>
-                          <Button variant="ghost" size="sm" title="Supprimer" onClick={() => handleDelete(doc.id)}>
+                          <Button variant="ghost" size="sm" title="Supprimer" onClick={() => handleDelete(doc.id)} className="p-1">
                             <Trash2 className="w-4 h-4 text-red-500" />
                           </Button>
                         </div>
@@ -917,30 +1009,43 @@ export default function Settings() {
           </TabsContent>
         </Tabs>
       ) : (
-        /* ── Admin / dispatcher: Security only ───────────────────────────── */
-        <div className="space-y-5">
-          <div className="space-y-5">
+        /* ── Admin / dispatcher: Tabbed layout ───────────────────────────── */
+        <Tabs defaultValue="account" className="w-full">
+          <TabsList className="mb-6">
+            <TabsTrigger value="account" className="gap-2">
+              <Lock className="w-4 h-4" /> Compte
+            </TabsTrigger>
+            <TabsTrigger value="integrations" className="gap-2">
+              <Link className="w-4 h-4" /> Intégrations
+            </TabsTrigger>
+            <TabsTrigger value="data" className="gap-2">
+              <FileSpreadsheet className="w-4 h-4" /> Données
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Account Tab - Email & Password */}
+          <TabsContent value="account" className="space-y-4 sm:space-y-6">
             {/* Change email */}
-            <Card className="p-6 space-y-4">
-              <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+            <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+              <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
                 <Mail className="w-4 h-4 text-gray-500" /> Changer d'adresse email
               </h2>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500">
                 Email actuel : <strong>{user?.email}</strong>
               </p>
-              <form onSubmit={handleEmail(onEmailSubmit)} className="space-y-3">
+              <form onSubmit={handleEmail(onEmailSubmit)} className="space-y-3 sm:space-y-4">
                 <div className="space-y-1">
-                  <Label htmlFor="ae-curpwd">Mot de passe actuel</Label>
+                  <Label htmlFor="ae-curpwd" className="text-xs sm:text-sm">Mot de passe actuel</Label>
                   <Input id="ae-curpwd" type="password" {...regEmail('currentPassword')}
-                    className={emailErrors.currentPassword ? 'border-red-500' : ''} />
+                    className={`w-full sm:max-w-md text-sm ${emailErrors.currentPassword ? 'border-red-500' : ''}`} />
                   {emailErrors.currentPassword && (
                     <p className="text-xs text-red-600">{emailErrors.currentPassword.message}</p>
                   )}
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="ae-newemail">Nouvel email</Label>
+                  <Label htmlFor="ae-newemail" className="text-xs sm:text-sm">Nouvel email</Label>
                   <Input id="ae-newemail" type="email" {...regEmail('newEmail')} placeholder="nouveau@stp.fr"
-                    className={emailErrors.newEmail ? 'border-red-500' : ''} />
+                    className={`w-full sm:max-w-md text-sm ${emailErrors.newEmail ? 'border-red-500' : ''}`} />
                   {emailErrors.newEmail && (
                     <p className="text-xs text-red-600">{emailErrors.newEmail.message}</p>
                   )}
@@ -949,154 +1054,158 @@ export default function Settings() {
                 <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                   Après modification, vous serez automatiquement déconnecté(e).
                 </p>
-                <Button type="submit" variant="outline" disabled={emailLoading}>
+                <Button type="submit" variant="outline" disabled={emailLoading} className="w-full sm:w-fit text-xs sm:text-sm">
                   {emailLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />…</> : 'Mettre à jour l\'email'}
                 </Button>
               </form>
             </Card>
 
             {/* Change password */}
-            <Card className="p-6 space-y-4">
-              <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+            <Card className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+              <h2 className="font-semibold text-gray-800 text-sm sm:text-base flex items-center gap-2">
                 <Lock className="w-4 h-4 text-gray-500" /> Changer de mot de passe
               </h2>
-              <form onSubmit={handlePwd(onPasswordSubmit)} className="space-y-3">
+              <form onSubmit={handlePwd(onPasswordSubmit)} className="space-y-3 sm:space-y-4">
                 <div className="space-y-1">
-                  <Label htmlFor="ap-cur">Mot de passe actuel</Label>
+                  <Label htmlFor="ap-cur" className="text-xs sm:text-sm">Mot de passe actuel</Label>
                   <Input id="ap-cur" type="password" {...regPwd('currentPassword')}
-                    className={pwdErrors.currentPassword ? 'border-red-500' : ''} />
+                    className={`w-full sm:max-w-md text-sm ${pwdErrors.currentPassword ? 'border-red-500' : ''}`} />
                   {pwdErrors.currentPassword && (
                     <p className="text-xs text-red-600">{pwdErrors.currentPassword.message}</p>
                   )}
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="ap-new">Nouveau mot de passe</Label>
+                  <Label htmlFor="ap-new" className="text-xs sm:text-sm">Nouveau mot de passe</Label>
                   <Input id="ap-new" type="password" {...regPwd('newPassword')} placeholder="Min. 6 caractères"
-                    className={pwdErrors.newPassword ? 'border-red-500' : ''} />
+                    className={`w-full sm:max-w-md text-sm ${pwdErrors.newPassword ? 'border-red-500' : ''}`} />
                   {pwdErrors.newPassword && (
                     <p className="text-xs text-red-600">{pwdErrors.newPassword.message}</p>
                   )}
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="ap-confirm">Confirmer</Label>
+                  <Label htmlFor="ap-confirm" className="text-xs sm:text-sm">Confirmer le mot de passe</Label>
                   <Input id="ap-confirm" type="password" {...regPwd('confirmPassword')}
-                    className={pwdErrors.confirmPassword ? 'border-red-500' : ''} />
+                    className={`w-full sm:max-w-md text-sm ${pwdErrors.confirmPassword ? 'border-red-500' : ''}`} />
                   {pwdErrors.confirmPassword && (
                     <p className="text-xs text-red-600">{pwdErrors.confirmPassword.message}</p>
                   )}
                 </div>
                 <Feedback ok={pwdMsg.ok} msg={pwdMsg.msg} />
-                <Button type="submit" disabled={pwdLoading}>
+                <Button type="submit" disabled={pwdLoading} className="w-full sm:w-fit text-xs sm:text-sm">
                   {pwdLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />…</> : 'Changer le mot de passe'}
                 </Button>
               </form>
             </Card>
-          </div>
+          </TabsContent>
 
-          {/* Google Sheets */}
-          <GoogleSheetsCard />
+          {/* Integrations Tab - Google Sheets & Mail */}
+          <TabsContent value="integrations" className="space-y-6">
+            <GoogleSheetsCard />
+            <MailConfigCard />
+          </TabsContent>
 
-          {/* Mail config */}
-          <MailConfigCard />
+          {/* Data Management Tab - Import & Pay Rates */}
+          <TabsContent value="data" className="space-y-6">
+            <ImportCard />
 
-          {/* Import manuel */}
-          <ImportCard />
-
-          {/* Global pay rates */}
-          <Card className="p-6 space-y-4">
-            <h2 className="font-semibold text-gray-800">Tarifs par défaut</h2>
-            <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
-              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              <span>
-                Ces tarifs s'appliquent à tous les employés sans tarif personnalisé.
-                Les journées déjà enregistrées ne sont pas modifiées.
-              </span>
-            </div>
-            {globalRatesLoading ? (
-              <div className="space-y-2">
-                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            {/* Global pay rates */}
+            <Card className="p-6 space-y-4">
+              <h2 className="font-semibold text-gray-800">Tarifs par défaut</h2>
+              <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Ces tarifs s'appliquent à tous les employés sans tarif personnalisé.
+                  Les journées déjà enregistrées ne sont pas modifiées.
+                </span>
               </div>
-            ) : (
-              <>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-gray-500 border-b">
-                      <th className="text-left py-2 font-medium">Type</th>
-                      <th className="text-center py-2 font-medium">Chauffeur (€)</th>
-                      <th className="text-center py-2 font-medium">Aide (€)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {TOUR_TYPES_ORDER.map((tt) => {
-                      const isMono = tt === 'MONO';
-                      const vals = globalRates[tt] ?? { chauffeurRate: '', aideRate: '' };
-                      return (
-                        <tr key={tt}>
-                          <td className="py-2 font-medium">{TOUR_TYPE_LABELS[tt]}</td>
-                          <td className="py-2 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={vals.chauffeurRate}
-                              onChange={(e) =>
-                                setGlobalRates((prev) => ({
-                                  ...prev,
-                                  [tt]: { ...vals, chauffeurRate: e.target.value },
-                                }))
-                              }
-                              className="w-20 border rounded px-2 py-1 text-center text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                          </td>
-                          <td className="py-2 text-center">
-                            {isMono ? (
-                              <span className="text-gray-300">—</span>
-                            ) : (
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={vals.aideRate}
-                                onChange={(e) =>
-                                  setGlobalRates((prev) => ({
-                                    ...prev,
-                                    [tt]: { ...vals, aideRate: e.target.value },
-                                  }))
-                                }
-                                className="w-20 border rounded px-2 py-1 text-center text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              />
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <div className="flex items-center gap-3 pt-1">
-                  <Button onClick={handleSaveGlobalRates} disabled={globalRatesSaving}>
-                    {globalRatesSaving ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
-                    ) : (
-                      'Enregistrer les tarifs'
-                    )}
-                  </Button>
+              {globalRatesLoading ? (
+                <div className="space-y-2">
+                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
                 </div>
-                <Feedback ok={globalRatesMsg.ok} msg={globalRatesMsg.msg} />
-                {globalRatesMeta.updatedAt && (
-                  <p className="text-xs text-gray-400">
-                    Dernière modification le{' '}
-                    {new Date(globalRatesMeta.updatedAt).toLocaleDateString('fr-FR', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                    })}{' '}
-                    par {globalRatesMeta.email ?? 'inconnu'}
-                  </p>
-                )}
-              </>
-            )}
-          </Card>
-        </div>
+              ) : (
+                <>
+                  <div className="rounded-lg border bg-card overflow-x-auto">
+                    <table className="w-full text-xs sm:text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-500 border-b bg-muted/50">
+                          <th className="text-left py-2 sm:py-3 px-2 sm:px-4 font-medium">Type</th>
+                          <th className="text-center py-2 sm:py-3 px-2 sm:px-4 font-medium whitespace-nowrap">Chauffeur (€)</th>
+                          <th className="text-center py-2 sm:py-3 px-2 sm:px-4 font-medium whitespace-nowrap">Aide (€)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {TOUR_TYPES_ORDER.map((tt) => {
+                          const isMono = tt === 'MONO';
+                          const vals = globalRates[tt] ?? { chauffeurRate: '', aideRate: '' };
+                          return (
+                            <tr key={tt} className="hover:bg-muted/50">
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium">{TOUR_TYPE_LABELS[tt]}</td>
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={vals.chauffeurRate}
+                                  onChange={(e) =>
+                                    setGlobalRates((prev) => ({
+                                      ...prev,
+                                      [tt]: { ...vals, chauffeurRate: e.target.value },
+                                    }))
+                                  }
+                                  className="w-16 sm:w-20 border rounded px-1.5 sm:px-2 py-1 text-center text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </td>
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
+                                {isMono ? (
+                                  <span className="text-gray-300">—</span>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={vals.aideRate}
+                                    onChange={(e) =>
+                                      setGlobalRates((prev) => ({
+                                        ...prev,
+                                        [tt]: { ...vals, aideRate: e.target.value },
+                                      }))
+                                    }
+                                    className="w-16 sm:w-20 border rounded px-1.5 sm:px-2 py-1 text-center text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-col gap-3 pt-2">
+                    <Button onClick={handleSaveGlobalRates} disabled={globalRatesSaving} className="w-full sm:w-fit text-xs sm:text-sm">
+                      {globalRatesSaving ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
+                      ) : (
+                        'Enregistrer les tarifs'
+                      )}
+                    </Button>
+                    <Feedback ok={globalRatesMsg.ok} msg={globalRatesMsg.msg} />
+                    {globalRatesMeta.updatedAt && (
+                      <p className="text-xs text-gray-400">
+                        Dernière modification le{' '}
+                        {new Date(globalRatesMeta.updatedAt).toLocaleDateString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })}{' '}
+                        par {globalRatesMeta.email ?? 'inconnu'}
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </Card>
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   );

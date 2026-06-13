@@ -7,19 +7,15 @@ import { GlobalRateItemDto } from './dto/upsert-global-pay-rates.dto';
 import { MailConfigDto } from './dto/mail-config.dto';
 
 export interface MailConfig {
-  host: string;
-  port: number;
-  user: string;
-  pass: string;
+  resendApiKey: string;
   from: string;
+  testRecipient?: string;
 }
 
 const MAIL_KEYS = {
-  host: 'mail.host',
-  port: 'mail.port',
-  user: 'mail.user',
-  pass: 'mail.pass',
+  resendApiKey: 'resend.api_key',
   from: 'mail.from',
+  testRecipient: 'mail.test_recipient',
 } as const;
 
 const INCLUDE_UPDATED_BY = {
@@ -87,26 +83,35 @@ export class SettingsService {
     });
   }
 
-  // ── Mail config ─────────────────────────────────────────────────────────────
+  // ── Mail config (Resend) ────────────────────────────────────────────────────
 
   async getMailConfig(): Promise<Partial<MailConfig>> {
     const cfg = await this.systemConfig.getMany(Object.values(MAIL_KEYS));
     return {
-      host: cfg[MAIL_KEYS.host] ?? undefined,
-      port: cfg[MAIL_KEYS.port] ? Number(cfg[MAIL_KEYS.port]) : undefined,
-      user: cfg[MAIL_KEYS.user] ?? undefined,
-      pass: cfg[MAIL_KEYS.pass] ? '••••••••' : undefined,
+      resendApiKey: cfg[MAIL_KEYS.resendApiKey]
+        ? cfg[MAIL_KEYS.resendApiKey].substring(0, 10) + '••••••••'
+        : undefined,
       from: cfg[MAIL_KEYS.from] ?? undefined,
+      testRecipient: cfg[MAIL_KEYS.testRecipient] ?? undefined,
     };
   }
 
   async saveMailConfig(cfg: MailConfigDto): Promise<void> {
-    await this.systemConfig.set(MAIL_KEYS.host, cfg.host);
-    await this.systemConfig.set(MAIL_KEYS.port, String(cfg.port));
-    await this.systemConfig.set(MAIL_KEYS.user, cfg.user);
-    if (cfg.pass && cfg.pass !== '••••••••') {
-      await this.systemConfig.set(MAIL_KEYS.pass, cfg.pass);
+    // Only update API key if provided and not masked
+    if (cfg.resendApiKey && !cfg.resendApiKey.includes('••••')) {
+      await this.systemConfig.set(MAIL_KEYS.resendApiKey, cfg.resendApiKey);
     }
-    await this.systemConfig.set(MAIL_KEYS.from, cfg.from);
+    // Update from address if provided
+    if (cfg.from) {
+      await this.systemConfig.set(MAIL_KEYS.from, cfg.from);
+    }
+    // Update test recipient if provided
+    if (cfg.testRecipient) {
+      await this.systemConfig.set(MAIL_KEYS.testRecipient, cfg.testRecipient);
+    }
+  }
+
+  async getTestRecipient(): Promise<string | null> {
+    return await this.systemConfig.get(MAIL_KEYS.testRecipient);
   }
 }
