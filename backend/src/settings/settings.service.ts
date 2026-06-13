@@ -96,7 +96,7 @@ export class SettingsService {
     };
   }
 
-  async saveMailConfig(cfg: MailConfigDto): Promise<void> {
+  async saveMailConfig(cfg: MailConfigDto): Promise<Partial<MailConfig>> {
     // Only update API key if provided and not masked
     if (cfg.resendApiKey && !cfg.resendApiKey.includes('••••')) {
       await this.systemConfig.set(MAIL_KEYS.resendApiKey, cfg.resendApiKey);
@@ -109,6 +109,8 @@ export class SettingsService {
     if (cfg.testRecipient) {
       await this.systemConfig.set(MAIL_KEYS.testRecipient, cfg.testRecipient);
     }
+    // Return current config after updates
+    return this.getMailConfig();
   }
 
   async getTestRecipient(): Promise<string | null> {
