@@ -694,7 +694,7 @@ export class GoogleSheetsService {
     });
 
     // Column widths: QUAI | TOURNEE | HEURE | IMMATRICULATION | NOM DU LIVREUR
-    const colWidths = [90, 110, 110, 170, 220];
+    const colWidths = [80, 100, 85, 160, 260];
     colWidths.forEach((pixelSize, i) =>
       requests.push({
         updateDimensionProperties: {
