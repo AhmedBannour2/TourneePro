@@ -386,7 +386,9 @@ export default function WorkedDays() {
     const m = new Map<number, WorkedDay>();
     for (const wd of workedDays ?? []) {
       const d = new Date(wd.date).getUTCDate();
-      if (!m.has(d)) m.set(d, wd);
+      const existing = m.get(d);
+      // Prefer ASSIGNED/CONFIRMED over CANCELLED — replace if existing is cancelled and new one isn't
+      if (!existing || (existing.status === 'CANCELLED' && wd.status !== 'CANCELLED')) m.set(d, wd);
     }
     return m;
   }, [workedDays]);

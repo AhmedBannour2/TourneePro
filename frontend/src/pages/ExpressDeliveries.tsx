@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Plus, Zap, Users, Camera, X, ChevronDown,
-  CheckCircle2, Loader2, Upload, Eye, UserCheck, AlertCircle,
+  CheckCircle2, Loader2, Upload, Eye, UserCheck, AlertCircle, Clock, Trash2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
@@ -19,7 +19,7 @@ import { ToastContainer } from '@/components/ui/toast';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type ExpressType = 'STANDARD' | 'GV';
+type ExpressType = 'STANDARD' | 'GV' | 'AUTRE';
 type ExpressStatus = 'PENDING' | 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
 
 interface ExpressEmployee {
@@ -33,11 +33,18 @@ interface ExpressAssignment {
   employee: ExpressEmployee;
 }
 
+interface ConfirmationPhoto {
+  id: string; url: string; uploadedAt: string;
+}
+
 interface ExpressDelivery {
   id: string; type: ExpressType; date: string; status: ExpressStatus;
-  photo: string | null; notes: string | null; createdAt: string; updatedAt: string;
+  photo: string | null; notes: string | null; pay: number | null;
+  startTime: string | null; endTime: string | null;
+  createdAt: string; updatedAt: string;
   createdBy: { id: string; email: string };
   assignments: ExpressAssignment[];
+  confirmationPhotos: ConfirmationPhoto[];
 }
 
 interface EmployeeOption {
@@ -47,9 +54,10 @@ interface EmployeeOption {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const TYPE_CONFIG: Record<ExpressType, { label: string; pay: number; cls: string }> = {
-  STANDARD: { label: 'Standard', pay: 30, cls: 'bg-blue-100 text-blue-800' },
-  GV:       { label: 'GV',       pay: 50, cls: 'bg-violet-100 text-violet-800' },
+const TYPE_CONFIG: Record<ExpressType, { label: string; pay: number | null; cls: string }> = {
+  STANDARD: { label: 'Standard', pay: 30,   cls: 'bg-blue-100 text-blue-800' },
+  GV:       { label: 'GV',       pay: 50,   cls: 'bg-violet-100 text-violet-800' },
+  AUTRE:    { label: 'Autre',    pay: null, cls: 'bg-orange-100 text-orange-800' },
 };
 
 const STATUS_CONFIG: Record<ExpressStatus, { label: string; cls: string }> = {
@@ -174,34 +182,39 @@ function CreateModal({ employees, onClose, onCreated }: {
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const today = new Date().toISOString().slice(0, 16);
+  const today = new Date().toISOString().slice(0, 10);
   const [dialogOpen, setDialogOpen] = useState(true);
   const [type, setType] = useState<ExpressType>('STANDARD');
+  const [customPay, setCustomPay] = useState('');
   const [date, setDate] = useState(today);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [employeeIds, setEmployeeIds] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const { error: toastError, toasts, removeToast } = useToast();
   const queryClient = useQueryClient();
 
+  const effectivePay = type === 'AUTRE' ? (parseFloat(customPay) || 0) : (TYPE_CONFIG[type].pay ?? 0);
+
   const uploadPhoto = (deliveryId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
-    // Let the browser set Content-Type with the correct multipart boundary
     api.post(`/express/${deliveryId}/photo`, form, {
       headers: { 'Content-Type': undefined as unknown as string },
     }).then(() => {
       queryClient.invalidateQueries({ queryKey: ['express'] });
-    }).catch(() => {
-      // Photo failed silently; express was already created and listed
-    });
+    }).catch(() => {});
   };
 
   const mut = useMutation({
     mutationFn: async () => {
-      const body = {
+      const body: Record<string, unknown> = {
         type,
         date: new Date(date).toISOString(),
+        ...(type === 'AUTRE' && customPay ? { pay: parseFloat(customPay) } : {}),
+        ...(startTime ? { startTime } : {}),
+        ...(endTime ? { endTime } : {}),
         ...(employeeIds.length > 0 ? { employeeIds } : {}),
         ...(notes ? { notes } : {}),
       };
@@ -209,17 +222,15 @@ function CreateModal({ employees, onClose, onCreated }: {
       return data;
     },
     onSuccess: (delivery) => {
-      // Close modal and notify parent first — toast lives in parent's container
       setDialogOpen(false);
       onCreated();
       onClose();
-      // Upload photo in background after modal is gone
       if (photoFile) uploadPhoto(delivery.id, photoFile);
     },
     onError: (e: any) => toastError(e.response?.data?.message || 'Erreur lors de la création'),
   });
 
-  const pay = TYPE_CONFIG[type].pay;
+  const canSubmit = date && (type !== 'AUTRE' || !!customPay);
 
   return (
     <>
@@ -233,48 +244,64 @@ function CreateModal({ employees, onClose, onCreated }: {
           </DialogHeader>
 
           <div className="space-y-4 py-1">
-            {/* Type toggle */}
+            {/* Type */}
             <div>
               <Label>Type</Label>
               <div className="flex gap-2 mt-1">
-                {(['STANDARD', 'GV'] as ExpressType[]).map(t => (
+                {(['STANDARD', 'GV', 'AUTRE'] as ExpressType[]).map(t => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setType(t)}
                     className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${type === t ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                   >
-                    {TYPE_CONFIG[t].label} — {TYPE_CONFIG[t].pay}€/pers.
+                    {TYPE_CONFIG[t].label}{TYPE_CONFIG[t].pay !== null ? ` — ${TYPE_CONFIG[t].pay}€` : ''}
                   </button>
                 ))}
               </div>
             </div>
 
+            {/* Custom pay — only for AUTRE */}
+            {type === 'AUTRE' && (
+              <div>
+                <Label>Tarif personnalisé (€/pers.) <span className="text-red-500">*</span></Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={customPay}
+                  onChange={e => setCustomPay(e.target.value)}
+                  placeholder="Ex: 45"
+                  className="mt-1"
+                />
+              </div>
+            )}
+
             {/* Date */}
             <div>
-              <Label>Date et heure <span className="text-red-500">*</span></Label>
-              <Input
-                type="datetime-local"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                className="mt-1"
-              />
+              <Label>Date <span className="text-red-500">*</span></Label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1" />
+            </div>
+
+            {/* Time interval */}
+            <div>
+              <Label>Horaire <span className="text-gray-400 font-normal">(optionnel — info pour l'employé)</span></Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-32" placeholder="Début" />
+                <span className="text-gray-400 text-sm">→</span>
+                <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-32" placeholder="Fin" />
+              </div>
             </div>
 
             {/* Employees */}
             <div>
               <Label>Employés assignés <span className="text-gray-400 font-normal">(optionnel, max 2)</span></Label>
               <div className="mt-1">
-                <EmployeeSelect
-                  employees={employees}
-                  selected={employeeIds}
-                  max={2}
-                  onChange={setEmployeeIds}
-                />
+                <EmployeeSelect employees={employees} selected={employeeIds} max={2} onChange={setEmployeeIds} />
               </div>
-              {employeeIds.length > 0 && (
+              {employeeIds.length > 0 && effectivePay > 0 && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Rémunération: {pay}€ × {employeeIds.length} = {pay * employeeIds.length}€
+                  Rémunération : {effectivePay}€ × {employeeIds.length} = {effectivePay * employeeIds.length}€
                 </p>
               )}
             </div>
@@ -293,23 +320,14 @@ function CreateModal({ employees, onClose, onCreated }: {
 
             {/* Photo */}
             <div>
-              <Label>Photo <span className="text-gray-400 font-normal">(optionnel, jpg/png/pdf)</span></Label>
+              <Label>Photo <span className="text-gray-400 font-normal">(optionnel)</span></Label>
               <div className="mt-1 flex items-center gap-2">
-                <input
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  id="photo-create"
-                  className="hidden"
-                  onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
-                />
+                <input type="file" accept=".jpg,.jpeg,.png,.pdf" id="photo-create" className="hidden"
+                  onChange={e => setPhotoFile(e.target.files?.[0] ?? null)} />
                 <label htmlFor="photo-create" className="cursor-pointer flex items-center gap-1.5 text-sm border border-dashed border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50">
                   <Upload size={14} /> {photoFile ? photoFile.name : 'Choisir un fichier'}
                 </label>
-                {photoFile && (
-                  <button onClick={() => setPhotoFile(null)} className="text-gray-400 hover:text-red-500">
-                    <X size={14} />
-                  </button>
-                )}
+                {photoFile && <button onClick={() => setPhotoFile(null)} className="text-gray-400 hover:text-red-500"><X size={14} /></button>}
               </div>
             </div>
           </div>
@@ -318,7 +336,7 @@ function CreateModal({ employees, onClose, onCreated }: {
             <Button variant="outline" onClick={onClose}>Annuler</Button>
             <Button
               onClick={() => mut.mutate()}
-              disabled={!date || mut.isPending || mut.isSuccess}
+              disabled={!canSubmit || mut.isPending || mut.isSuccess}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {mut.isPending ? <><Loader2 size={14} className="mr-1 animate-spin" /> Création…</> : 'Créer'}
@@ -327,6 +345,56 @@ function CreateModal({ employees, onClose, onCreated }: {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ── Confirmation photo thumbnail ───────────────────────────────────────────────
+
+function ConfirmPhotoThumb({ deliveryId, photo, onDelete }: {
+  deliveryId: string;
+  photo: ConfirmationPhoto;
+  onDelete: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [mime, setMime] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/express/${deliveryId}/confirmation-photos/${photo.id}`, { responseType: 'blob' })
+      .then(r => { setMime(r.data.type); setSrc(URL.createObjectURL(r.data)); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [deliveryId, photo.id]);
+
+  return (
+    <div className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50" style={{ aspectRatio: '4/3' }}>
+      {loading ? (
+        <Skeleton className="absolute inset-0" />
+      ) : src ? (
+        mime === 'application/pdf' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer" onClick={() => window.open(src, '_blank')}>
+            <svg className="w-8 h-8 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+            </svg>
+            <span className="text-xs text-blue-600">PDF</span>
+          </div>
+        ) : (
+          <img src={src} alt="Confirmation"
+            className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+            onClick={() => window.open(src, '_blank')} />
+        )
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <AlertCircle size={16} className="text-gray-300" />
+        </div>
+      )}
+      <button
+        onClick={onDelete}
+        className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow"
+      >
+        <Trash2 size={11} />
+      </button>
+    </div>
   );
 }
 
@@ -341,21 +409,45 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
   const queryClient = useQueryClient();
   const { success, error: toastError, toasts, removeToast } = useToast();
 
+  // Treat stale non-Cloudinary paths (pre-migration) as absent
+  const effectivePhoto = delivery.photo?.startsWith('https://') ? delivery.photo : null;
+
+  // Editable detail fields
+  const [editType, setEditType] = useState<ExpressType>(delivery.type);
+  const [editDate, setEditDate] = useState(new Date(delivery.date).toISOString().slice(0, 10));
+  const [editStartTime, setEditStartTime] = useState(delivery.startTime ?? '');
+  const [editEndTime, setEditEndTime] = useState(delivery.endTime ?? '');
+  const [editPay, setEditPay] = useState(delivery.pay?.toString() ?? '');
+
   const [notes, setNotes] = useState(delivery.notes ?? '');
   const [assignIds, setAssignIds] = useState<string[]>(delivery.assignments.map(a => a.employeeId));
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [loadingPhoto, setLoadingPhoto] = useState(!!delivery.photo);
+  const [photoMime, setPhotoMime] = useState<string>('');
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const confirmPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  // Load photo as blob URL when panel opens
+  // Load admin photo (only for valid Cloudinary URLs)
   useEffect(() => {
-    if (!delivery.photo) return;
+    if (!effectivePhoto) return;
     setLoadingPhoto(true);
     api.get(`/express/${delivery.id}/photo`, { responseType: 'blob' })
-      .then(r => setPhotoUrl(URL.createObjectURL(r.data)))
+      .then(r => { setPhotoMime(r.data.type); setPhotoUrl(URL.createObjectURL(r.data)); })
       .catch(() => {})
       .finally(() => setLoadingPhoto(false));
-  }, [delivery.id, delivery.photo]);
+  }, [delivery.id, effectivePhoto]);
+
+  const saveDetailsMut = useMutation({
+    mutationFn: () => api.patch(`/express/${delivery.id}`, {
+      type: editType,
+      date: new Date(editDate).toISOString(),
+      startTime: editStartTime || null,
+      endTime: editEndTime || null,
+      ...(editType === 'AUTRE' ? { pay: parseFloat(editPay) || null } : {}),
+    }),
+    onSuccess: () => { success('Détails sauvegardés'); onUpdated(); },
+    onError: (e: any) => toastError(e.response?.data?.message || 'Erreur'),
+  });
 
   const saveNotesMut = useMutation({
     mutationFn: () => api.patch(`/express/${delivery.id}`, { notes: notes || null }),
@@ -397,9 +489,33 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
     onError: () => toastError('Erreur lors de l\'envoi'),
   });
 
+  const addConfirmPhotoMut = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post(`/express/${delivery.id}/confirmation-photos`, form);
+    },
+    onSuccess: () => {
+      success('Photo de confirmation ajoutée');
+      queryClient.invalidateQueries({ queryKey: ['express'] });
+      onUpdated();
+    },
+    onError: () => toastError('Erreur lors de l\'envoi'),
+  });
+
+  const deleteConfirmPhotoMut = useMutation({
+    mutationFn: (photoId: string) => api.delete(`/express/${delivery.id}/confirmation-photos/${photoId}`),
+    onSuccess: () => {
+      success('Photo supprimée');
+      queryClient.invalidateQueries({ queryKey: ['express'] });
+      onUpdated();
+    },
+    onError: () => toastError('Erreur'),
+  });
+
   const tc = TYPE_CONFIG[delivery.type];
   const sc = STATUS_CONFIG[delivery.status];
-  const canEdit = delivery.status !== 'CONFIRMED' && delivery.status !== 'CANCELLED';
+  const notCancelled = delivery.status !== 'CANCELLED';
 
   return (
     <>
@@ -413,11 +529,63 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
               <Badge className={tc.cls}>{tc.label}</Badge>
               <Badge className={sc.cls}>{sc.label}</Badge>
             </SheetTitle>
-            <p className="text-sm text-gray-500">{fmtDate(delivery.date)} · {fmtTime(delivery.date)}</p>
+            <p className="text-sm text-gray-500">{fmtDate(delivery.date)}</p>
           </SheetHeader>
 
           <div className="space-y-6">
-            {/* Employees */}
+
+            {/* ── Détails (always editable) ── */}
+            {notCancelled && (
+              <section>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Détails</h3>
+                <div className="space-y-3">
+                  {/* Type */}
+                  <div>
+                    <Label className="text-xs text-gray-600">Type</Label>
+                    <div className="flex gap-2 mt-1">
+                      {(['STANDARD', 'GV', 'AUTRE'] as ExpressType[]).map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setEditType(t)}
+                          className={`flex-1 py-1.5 rounded-lg border text-xs font-medium transition-colors ${editType === t ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                        >
+                          {TYPE_CONFIG[t].label}{TYPE_CONFIG[t].pay !== null ? ` — ${TYPE_CONFIG[t].pay}€` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Custom pay for AUTRE */}
+                  {editType === 'AUTRE' && (
+                    <div>
+                      <Label className="text-xs text-gray-600">Tarif (€/pers.)</Label>
+                      <Input type="number" min="0" step="0.5" value={editPay}
+                        onChange={e => setEditPay(e.target.value)} className="mt-1 h-8 text-sm" />
+                    </div>
+                  )}
+                  {/* Date */}
+                  <div>
+                    <Label className="text-xs text-gray-600">Date</Label>
+                    <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="mt-1 h-8 text-sm" />
+                  </div>
+                  {/* Horaire */}
+                  <div>
+                    <Label className="text-xs text-gray-600 flex items-center gap-1"><Clock size={11} /> Horaire</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Input type="time" value={editStartTime} onChange={e => setEditStartTime(e.target.value)} className="h-8 text-sm w-32" />
+                      <span className="text-gray-400 text-sm">→</span>
+                      <Input type="time" value={editEndTime} onChange={e => setEditEndTime(e.target.value)} className="h-8 text-sm w-32" />
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => saveDetailsMut.mutate()} disabled={saveDetailsMut.isPending} className="w-full">
+                    {saveDetailsMut.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : null}
+                    Sauvegarder les détails
+                  </Button>
+                </div>
+              </section>
+            )}
+
+            {/* ── Employés ── */}
             <section>
               <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">
                 <Users size={14} /> Employés assignés
@@ -432,34 +600,19 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
                         <p className="text-sm font-medium">{a.employee.name}</p>
                         <p className="text-xs text-gray-500">{a.employee.role} · {a.pay}€</p>
                       </div>
-                      {a.confirmedAt ? (
-                        <span className="flex items-center gap-1 text-xs text-green-700 font-medium">
-                          <CheckCircle2 size={12} /> Confirmé
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">En attente</span>
-                      )}
+                      {a.confirmedAt
+                        ? <span className="flex items-center gap-1 text-xs text-green-700 font-medium"><CheckCircle2 size={12} /> Confirmé</span>
+                        : <span className="text-xs text-gray-400">En attente</span>}
                     </div>
                   ))}
                 </div>
               )}
-
-              {/* Assign section */}
-              {canEdit && (
+              {notCancelled && (
                 <div className="mt-3 space-y-2">
                   <Label className="text-xs text-gray-600">Modifier les assignations (max 2)</Label>
-                  <EmployeeSelect
-                    employees={employees}
-                    selected={assignIds}
-                    max={2}
-                    onChange={setAssignIds}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => assignMut.mutate()}
-                    disabled={assignIds.length === 0 || assignMut.isPending}
-                    className="w-full"
-                  >
+                  <EmployeeSelect employees={employees} selected={assignIds} max={2} onChange={setAssignIds} />
+                  <Button size="sm" onClick={() => assignMut.mutate()}
+                    disabled={assignIds.length === 0 || assignMut.isPending} className="w-full">
                     {assignMut.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : <UserCheck size={13} className="mr-1" />}
                     Enregistrer les assignations
                   </Button>
@@ -467,29 +620,30 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
               )}
             </section>
 
-            {/* Photo */}
+            {/* ── Photo admin ── */}
             <section>
               <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                <Camera size={14} /> Photo
+                <Camera size={14} /> Document de mission
               </h3>
-              {delivery.photo ? (
+              {effectivePhoto ? (
                 loadingPhoto ? (
                   <Skeleton className="h-48 w-full rounded-lg" />
                 ) : photoUrl ? (
                   <div className="relative">
-                    <img
-                      src={photoUrl}
-                      alt="Photo express"
-                      className="w-full rounded-lg border border-gray-200 object-contain max-h-64"
-                    />
-                    {canEdit && (
-                      <button
-                        onClick={() => photoInputRef.current?.click()}
-                        className="absolute top-2 right-2 bg-white border border-gray-200 rounded-md px-2 py-1 text-xs shadow hover:bg-gray-50"
-                      >
-                        Remplacer
-                      </button>
+                    {photoMime === 'application/pdf' ? (
+                      <div className="flex flex-col items-center gap-3 py-6 border border-gray-200 rounded-lg bg-gray-50">
+                        <svg className="w-12 h-12 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+                        </svg>
+                        <button onClick={() => window.open(photoUrl!, '_blank')} className="text-xs text-blue-600 underline">Ouvrir le PDF</button>
+                      </div>
+                    ) : (
+                      <img src={photoUrl} alt="Document mission" className="w-full rounded-lg border border-gray-200 object-contain max-h-64" />
                     )}
+                    <button onClick={() => photoInputRef.current?.click()}
+                      className="absolute top-2 right-2 bg-white border border-gray-200 rounded-md px-2 py-1 text-xs shadow hover:bg-gray-50">
+                      Remplacer
+                    </button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -497,29 +651,13 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
                   </div>
                 )
               ) : (
-                canEdit ? (
-                  <button
-                    onClick={() => photoInputRef.current?.click()}
-                    className="w-full border-2 border-dashed border-gray-300 rounded-lg py-6 text-sm text-gray-400 hover:border-blue-400 hover:text-blue-500 flex flex-col items-center gap-1"
-                  >
-                    <Upload size={20} />
-                    Joindre une photo ou PDF
-                  </button>
-                ) : (
-                  <p className="text-sm text-gray-400 italic">Aucune photo jointe</p>
-                )
+                <button onClick={() => photoInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-gray-300 rounded-lg py-6 text-sm text-gray-400 hover:border-blue-400 hover:text-blue-500 flex flex-col items-center gap-1">
+                  <Upload size={20} /> Joindre un document ou photo
+                </button>
               )}
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept=".jpg,.jpeg,.png,.pdf"
-                className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) photoMut.mutate(file);
-                  e.target.value = '';
-                }}
-              />
+              <input ref={photoInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) photoMut.mutate(f); e.target.value = ''; }} />
               {photoMut.isPending && (
                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                   <Loader2 size={11} className="animate-spin" /> Envoi en cours…
@@ -527,46 +665,61 @@ function DetailPanel({ delivery, employees, onClose, onUpdated }: {
               )}
             </section>
 
-            {/* Notes */}
+            {/* ── Photos de confirmation (employee) ── */}
             <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes</h3>
-              {canEdit ? (
-                <div className="space-y-2">
-                  <textarea
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                    placeholder="Aucune note…"
-                    rows={3}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => saveNotesMut.mutate()}
-                    disabled={saveNotesMut.isPending || notes === (delivery.notes ?? '')}
-                    className="w-full"
-                  >
-                    {saveNotesMut.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : null}
-                    Sauvegarder les notes
-                  </Button>
-                </div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                <Camera size={14} /> Photos de confirmation
+                {delivery.confirmationPhotos.length > 0 && (
+                  <span className="ml-1 text-xs text-gray-400">({delivery.confirmationPhotos.length})</span>
+                )}
+              </h3>
+              {delivery.confirmationPhotos.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">Aucune photo de confirmation</p>
               ) : (
-                <p className="text-sm text-gray-600">{delivery.notes || <span className="italic text-gray-400">Aucune note</span>}</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {delivery.confirmationPhotos.map(p => (
+                    <ConfirmPhotoThumb
+                      key={p.id}
+                      deliveryId={delivery.id}
+                      photo={p}
+                      onDelete={() => {
+                        if (confirm('Supprimer cette photo ?')) deleteConfirmPhotoMut.mutate(p.id);
+                      }}
+                    />
+                  ))}
+                </div>
               )}
+              <button onClick={() => confirmPhotoInputRef.current?.click()}
+                className="mt-2 w-full border border-dashed border-gray-300 rounded-lg py-2 text-xs text-gray-400 hover:border-blue-400 hover:text-blue-500 flex items-center justify-center gap-1">
+                {addConfirmPhotoMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                Ajouter une photo de confirmation
+              </button>
+              <input ref={confirmPhotoInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) addConfirmPhotoMut.mutate(f); e.target.value = ''; }} />
             </section>
 
-            {/* Cancel */}
-            {canEdit && delivery.status !== 'CANCELLED' && (
+            {/* ── Notes ── */}
+            <section>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes</h3>
+              <div className="space-y-2">
+                <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  placeholder="Aucune note…" rows={3}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+                <Button size="sm" variant="outline" onClick={() => saveNotesMut.mutate()}
+                  disabled={saveNotesMut.isPending || notes === (delivery.notes ?? '')} className="w-full">
+                  {saveNotesMut.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : null}
+                  Sauvegarder les notes
+                </Button>
+              </div>
+            </section>
+
+            {/* ── Cancel ── */}
+            {notCancelled && delivery.status !== 'CONFIRMED' && (
               <section className="pt-2 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
+                <Button variant="outline" size="sm"
                   className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                  onClick={() => {
-                    if (confirm('Annuler cette mission express ?')) cancelMut.mutate();
-                  }}
-                  disabled={cancelMut.isPending}
-                >
+                  onClick={() => { if (confirm('Annuler cette mission express ?')) cancelMut.mutate(); }}
+                  disabled={cancelMut.isPending}>
                   {cancelMut.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : <X size={13} className="mr-1" />}
                   Annuler la mission
                 </Button>
@@ -618,7 +771,10 @@ function ExpressCard({ delivery, onView }: { delivery: ExpressDelivery; onView: 
           </div>
 
           {/* Pay */}
-          <p className="text-xs text-gray-400 mt-1">{tc.pay}€/pers. · {delivery.assignments.length} assigné(s)</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {delivery.type === 'AUTRE' ? (delivery.pay !== null ? `${delivery.pay}€/pers.` : 'Tarif personnalisé') : `${tc.pay}€/pers.`}
+            {' · '}{delivery.assignments.length} assigné(s)
+          </p>
 
           {/* Notes excerpt */}
           {delivery.notes && (

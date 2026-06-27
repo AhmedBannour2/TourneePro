@@ -21,7 +21,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "db:pull-prod": "ts-node scripts/pull-prod-data.ts",
+    "db:load-prod": "ts-node scripts/load-prod-data.ts",
+    "db:sanitize-emails": "ts-node scripts/sanitize-emails.ts"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -46,6 +49,7 @@
     "bullmq": "^5.77.6",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "cloudinary": "^2.10.0",
     "exceljs": "^4.4.0",
     "googleapis": "^173.0.0",
     "helmet": "^8.2.0",

@@ -15,6 +15,9 @@ describe('PlatformsService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    platformPayRate: {
+      create: jest.fn(),
+    },
   };
 
   const mockPlatform = {
@@ -74,9 +77,7 @@ describe('PlatformsService', () => {
 
       mockPrismaService.platform.create.mockRejectedValue(prismaError);
 
-      await expect(service.create(createDto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.create(createDto)).rejects.toThrow(ConflictException);
     });
   });
 
@@ -109,9 +110,7 @@ describe('PlatformsService', () => {
     it('should throw NotFoundException if platform not found', async () => {
       mockPrismaService.platform.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne('non-existent-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.findOne('non-existent-id')).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -142,9 +141,7 @@ describe('PlatformsService', () => {
       mockPrismaService.platform.findUnique.mockResolvedValue(mockPlatform);
       mockPrismaService.platform.update.mockRejectedValue(prismaError);
 
-      await expect(service.update(mockPlatform.id, updateDto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.update(mockPlatform.id, updateDto)).rejects.toThrow(ConflictException);
     });
   });
 });

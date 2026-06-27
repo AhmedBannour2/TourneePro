@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
   ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck, RefreshCw,
-  SlidersHorizontal, Pencil, Bell, BellOff,
+  SlidersHorizontal, Pencil, Bell, BellOff, FileSpreadsheet,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -47,6 +47,86 @@ function SyncButton() {
         <RefreshCw size={15} className={mutation.isPending ? 'animate-spin' : ''} />
         <span className="hidden sm:inline">{mutation.isPending ? 'Sync...' : 'Actualiser'}</span>
       </Button>
+    </>
+  );
+}
+
+// ─── Export Button ────────────────────────────────────────────────────────────
+
+function ExportButton({ dateKey }: { dateKey: string }) {
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [showWarnings, setShowWarnings] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const doExport = useMutation({
+    mutationFn: () => api.post<{ url: string }>(`/google-sheets/export?date=${dateKey}`),
+    onSuccess: ({ data }) => { setShowWarnings(false); setExportError(null); window.open(data.url, '_blank'); },
+    onError: (err: any) => { setShowWarnings(false); setExportError(err?.response?.data?.message || 'Erreur d\'export'); },
+  });
+
+  const checkThenExport = useMutation({
+    mutationFn: () => api.get<{ warnings: string[] }>(`/google-sheets/export/check?date=${dateKey}`),
+    onSuccess: ({ data }) => {
+      if (data.warnings.length === 0) {
+        doExport.mutate();
+      } else {
+        setWarnings(data.warnings);
+        setShowWarnings(true);
+      }
+    },
+    onError: (err: any) => setExportError(err?.response?.data?.message || 'Erreur'),
+  });
+
+  const isPending = checkThenExport.isPending || doExport.isPending;
+
+  return (
+    <>
+      <button
+        onClick={e => { e.stopPropagation(); setExportError(null); checkThenExport.mutate(); }}
+        disabled={isPending}
+        title={exportError ?? 'Exporter les affectations vers Google Sheets'}
+        className={`ml-2 shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors
+          ${exportError
+            ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100'
+            : 'border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+          }`}
+      >
+        {isPending ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+        <span className="hidden sm:inline">{isPending ? 'Export...' : 'Exporter'}</span>
+      </button>
+
+      {showWarnings && (
+        <Dialog open onOpenChange={o => { if (!o) setShowWarnings(false); }}>
+          <DialogContent className="max-w-md" onClick={e => e.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-700">
+                <span>⚠</span> Données manquantes
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-1.5 text-sm text-gray-700 max-h-56 overflow-y-auto py-1">
+              {warnings.map((w, i) => (
+                <p key={i} className="flex items-start gap-2">
+                  <span className="text-amber-500 shrink-0 mt-0.5">•</span>{w}
+                </p>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Les cellules manquantes seront laissées vides dans le tableau.</p>
+            <DialogFooter className="mt-3">
+              <Button variant="outline" size="sm" onClick={() => setShowWarnings(false)}>Annuler</Button>
+              <Button
+                size="sm"
+                onClick={() => doExport.mutate()}
+                disabled={doExport.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {doExport.isPending
+                  ? <><Loader2 size={13} className="mr-1.5 animate-spin" />Export...</>
+                  : 'Exporter quand même'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
@@ -1079,7 +1159,8 @@ function DateGroup({ dateKey, tours, defaultExpanded, onView, onEdit, onDelete }
           {open ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
         </button>
 
-        {/* Right: validate button */}
+        {/* Right: export + validate buttons */}
+        <ExportButton dateKey={dateKey} />
         <button
           onClick={e => { e.stopPropagation(); setValidateOpen(true); }}
           className={`ml-3 shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors

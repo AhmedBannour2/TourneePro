@@ -16,6 +16,7 @@ const KEYS = {
   connectedEmail: 'google.connected_email',
   sheet1Url: 'sheets.url_1',
   sheet2Url: 'sheets.url_2',
+  exportSheetId: 'sheets.export_sheet_id',
 } as const;
 
 export interface SyncResult {
@@ -55,7 +56,7 @@ export class GoogleSheetsService {
       prompt: 'consent',
       state,
       scope: [
-        'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/userinfo.email',
       ],
     });
@@ -308,6 +309,410 @@ export class GoogleSheetsService {
     );
 
     return result;
+  }
+
+  // ── Export ──────────────────────────────────────────────────────────────────
+
+  async checkAffectations(dateStr: string): Promise<{ warnings: string[] }> {
+    const date = new Date(dateStr + 'T00:00:00.000Z');
+    const nextDay = new Date(date);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const tours = await this.prisma.tour.findMany({
+      where: { date: { gte: date, lt: nextDay } },
+      include: {
+        platform: true,
+        assignments: { include: { chauffeur: true, aide: true, truck: true } },
+      },
+    });
+
+    const warnings: string[] = [];
+    for (const tour of tours) {
+      const assignment = tour.assignments[0] ?? null;
+      const label = `Tournée ${tour.tourCode} (${tour.platform?.name ?? ''})`;
+      if (!tour.horaire) warnings.push(`${label} : heure manquante`);
+      if (!assignment?.truck && !tour.immatriculation)
+        warnings.push(`${label} : immatriculation manquante`);
+      if (!assignment?.chauffeur) warnings.push(`${label} : chauffeur non assigné`);
+    }
+
+    return { warnings };
+  }
+
+  private buildDisplayName(
+    emp: { name: string; firstName: string | null; lastName: string | null },
+    firstNameCounts: Map<string, number>,
+  ): string {
+    const firstName = emp.firstName ?? emp.name.split(' ')[0];
+    const key = firstName.toLowerCase();
+    if ((firstNameCounts.get(key) ?? 1) > 1) {
+      const ln = emp.lastName ?? emp.name.split(' ').slice(1).join(' ');
+      const abbr = ln.substring(0, 2).toLowerCase();
+      return abbr ? `${firstName} ${abbr}` : firstName;
+    }
+    return firstName;
+  }
+
+  async exportAffectations(dateStr: string): Promise<{ url: string }> {
+    const refreshToken = await this.systemConfig.get(KEYS.refreshToken);
+    if (!refreshToken) {
+      throw new ServiceUnavailableException(
+        'Google account not connected. Go to Settings → Google Sheets to connect.',
+      );
+    }
+
+    const client = this.createOAuthClient();
+    client.setCredentials({ refresh_token: refreshToken });
+    const sheetsApi = google.sheets({ version: 'v4', auth: client });
+
+    // Get or create the persistent export sheet
+    let spreadsheetId = await this.systemConfig.get(KEYS.exportSheetId);
+    let sheetTabId = 0;
+    let sheetTabName = 'Sheet1';
+
+    if (!spreadsheetId) {
+      const created = await sheetsApi.spreadsheets.create({
+        requestBody: { properties: { title: 'TourneePro — Affectations STP' } },
+      });
+      spreadsheetId = created.data.spreadsheetId!;
+      sheetTabId = created.data.sheets?.[0]?.properties?.sheetId ?? 0;
+      sheetTabName = created.data.sheets?.[0]?.properties?.title ?? 'Sheet1';
+      await this.systemConfig.set(KEYS.exportSheetId, spreadsheetId);
+      this.logger.log(`Export sheet created: ${spreadsheetId}`);
+    } else {
+      const meta = await sheetsApi.spreadsheets.get({ spreadsheetId });
+      sheetTabId = meta.data.sheets?.[0]?.properties?.sheetId ?? 0;
+      sheetTabName = meta.data.sheets?.[0]?.properties?.title ?? 'Sheet1';
+    }
+
+    // Query all tours for the given date with full assignment data
+    const date = new Date(dateStr + 'T00:00:00.000Z');
+    const nextDay = new Date(date);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const tours = await this.prisma.tour.findMany({
+      where: { date: { gte: date, lt: nextDay } },
+      include: {
+        platform: true,
+        assignments: {
+          include: { chauffeur: true, aide: true, truck: true },
+        },
+      },
+      orderBy: [{ tourCode: 'asc' }],
+    });
+
+    // Group by platform, Alfortville first then Garonor
+    const byPlatform = new Map<string, typeof tours>();
+    for (const tour of tours) {
+      const name = tour.platform?.name ?? 'Autre';
+      if (!byPlatform.has(name)) byPlatform.set(name, []);
+      byPlatform.get(name)!.push(tour);
+    }
+    const PLATFORM_ORDER = ['Alfortville', 'Garonor'];
+    const sortedPlatforms = [...byPlatform.keys()].sort((a, b) => {
+      const ai = PLATFORM_ORDER.indexOf(a);
+      const bi = PLATFORM_ORDER.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    const dateLabel = date.toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+
+    // ── Repos employees: active employees with no tour assignment today ─────────
+    const assignedIds = new Set<string>();
+    for (const tour of tours) {
+      const a = tour.assignments[0];
+      if (a?.chauffeurId) assignedIds.add(a.chauffeurId);
+      if (a?.aideId) assignedIds.add(a.aideId);
+    }
+
+    const allActive = await this.prisma.employee.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, firstName: true, lastName: true, role: true },
+    });
+    const reposEmps = allActive.filter((e) => !assignedIds.has(e.id));
+    const reposEmpIds = new Set(reposEmps.map((e) => e.id));
+
+    // Look at yesterday's assignments to group repos employees by their pairing
+    const yesterday = new Date(date);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const yesterdayAssignments =
+      reposEmps.length > 0
+        ? await this.prisma.assignment.findMany({
+            where: {
+              tour: { date: { gte: yesterday, lt: date } },
+              OR: [
+                { chauffeurId: { in: reposEmps.map((e) => e.id) } },
+                { aideId: { in: reposEmps.map((e) => e.id) } },
+              ],
+            },
+            include: {
+              chauffeur: true,
+              aide: true,
+              truck: true,
+              tour: { include: { platform: true } },
+            },
+          })
+        : [];
+
+    // Flat repos rows list — one entry per display row (no platform grouping)
+    type ReposEmp = (typeof reposEmps)[number];
+    type ReposRow = { emps: ReposEmp[]; truck: string };
+    const reposRows: ReposRow[] = [];
+    const processedReposIds = new Set<string>();
+
+    for (const ya of yesterdayAssignments) {
+      const emps = [
+        ya.chauffeurId && reposEmpIds.has(ya.chauffeurId) && !processedReposIds.has(ya.chauffeurId)
+          ? reposEmps.find((e) => e.id === ya.chauffeurId)
+          : null,
+        ya.aideId && reposEmpIds.has(ya.aideId) && !processedReposIds.has(ya.aideId)
+          ? reposEmps.find((e) => e.id === ya.aideId)
+          : null,
+      ].filter(Boolean) as ReposEmp[];
+
+      if (emps.length > 0) {
+        emps.forEach((e) => processedReposIds.add(e.id));
+        reposRows.push({ emps, truck: ya.truck?.immatriculation ?? '' });
+      }
+    }
+
+    // Remaining (no yesterday match) — zip chauffeurs with aides for clean CHAUFFEUR+AIDE pairs
+    const unmatched = reposEmps.filter((e) => !processedReposIds.has(e.id));
+    const unmatchedChauffeurs = unmatched.filter((e) => e.role.toUpperCase() === 'CHAUFFEUR');
+    const unmatchedAides = unmatched.filter((e) => e.role.toUpperCase() !== 'CHAUFFEUR');
+    for (let i = 0; i < Math.max(unmatchedChauffeurs.length, unmatchedAides.length); i++) {
+      const pair = [unmatchedChauffeurs[i], unmatchedAides[i]].filter(Boolean) as ReposEmp[];
+      if (pair.length > 0) reposRows.push({ emps: pair, truck: '' });
+    }
+
+    // ── First-name frequency map (tours + repos) for smart name display ────────
+    const firstNameCounts = new Map<string, number>();
+    for (const tour of tours) {
+      const assignment = tour.assignments[0] ?? null;
+      for (const emp of [assignment?.chauffeur, assignment?.aide]) {
+        if (!emp) continue;
+        const fn = (emp.firstName ?? emp.name.split(' ')[0]).toLowerCase();
+        firstNameCounts.set(fn, (firstNameCounts.get(fn) ?? 0) + 1);
+      }
+    }
+    for (const emp of reposEmps) {
+      const fn = (emp.firstName ?? emp.name.split(' ')[0]).toLowerCase();
+      firstNameCounts.set(fn, (firstNameCounts.get(fn) ?? 0) + 1);
+    }
+
+    // Colors (Google Sheets API uses 0-1 scale)
+    const C = {
+      orange: { red: 1, green: 0.6, blue: 0 },
+      amber: { red: 1, green: 0.76, blue: 0.03 }, // REPOS section header
+      cyan: { red: 0, green: 0.9, blue: 1 },
+      cyanDark: { red: 0, green: 0.6, blue: 0.8 }, // QUAI column
+      yellow: { red: 1, green: 1, blue: 0 },
+      green: { red: 0, green: 0.85, blue: 0 },
+      white: { red: 1, green: 1, blue: 1 },
+    };
+
+    const COLS = 5;
+    const values: string[][] = [];
+    const requests: any[] = [];
+
+    const addMerge = (rowIndex: number) =>
+      requests.push({
+        mergeCells: {
+          range: {
+            sheetId: sheetTabId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 0,
+            endColumnIndex: COLS,
+          },
+          mergeType: 'MERGE_ALL',
+        },
+      });
+
+    const colorRow = (rowIndex: number, color: object, bold = false, fontSize = 11) =>
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheetTabId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 0,
+            endColumnIndex: COLS,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: color,
+              textFormat: { bold, fontSize },
+              horizontalAlignment: 'CENTER',
+            },
+          },
+          fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+        },
+      });
+
+    const colorCell = (rowIndex: number, colIndex: number, color: object, bold = false) =>
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheetTabId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: colIndex,
+            endColumnIndex: colIndex + 1,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: color,
+              textFormat: { bold },
+              horizontalAlignment: 'CENTER',
+            },
+          },
+          fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+        },
+      });
+
+    // Title row
+    values.push(['STP', '', '', '', '']);
+    addMerge(0);
+    colorRow(0, C.orange, true, 14);
+
+    for (const platformName of sortedPlatforms) {
+      const platformTours = byPlatform.get(platformName)!;
+
+      const platformRow = values.length;
+      values.push([`PLATE-FORME ${platformName.toUpperCase()}`, '', '', '', '']);
+      addMerge(platformRow);
+      colorRow(platformRow, C.cyan, true, 12);
+
+      const dateRow = values.length;
+      values.push([dateLabel, '', '', '', '']);
+      addMerge(dateRow);
+      colorRow(dateRow, C.cyan, false, 11);
+
+      const headerRow = values.length;
+      values.push(['QUAI', 'TOURNEE', 'HEURE', 'IMMATRICULATION', 'NOM DU LIVREUR']);
+      colorRow(headerRow, C.cyan, true, 11);
+
+      for (const tour of platformTours) {
+        const assignment = tour.assignments[0] ?? null;
+        const quai = tour.quai ?? '';
+        const heure = tour.horaire ?? '';
+        const immat = assignment?.truck?.immatriculation ?? tour.immatriculation ?? '';
+        const nomParts = [assignment?.chauffeur, assignment?.aide]
+          .filter(Boolean)
+          .map((emp) => this.buildDisplayName(emp!, firstNameCounts));
+        const nom = nomParts.join('+');
+
+        const dataRow = values.length;
+        values.push([quai, tour.tourCode, heure, immat, nom]);
+
+        // All data cells always get their color — never white even when empty
+        colorCell(dataRow, 0, C.cyanDark);
+        colorCell(dataRow, 1, C.yellow);
+        colorCell(dataRow, 2, C.green);
+        colorCell(dataRow, 3, C.yellow);
+        colorCell(dataRow, 4, C.yellow);
+      }
+
+      // Repos rows for this platform
+      // Separator row between platforms — cyan to match theme
+      const sepRow = values.length;
+      values.push(['', '', '', '', '']);
+      colorRow(sepRow, C.cyan);
+    }
+
+    // ── Dedicated REPOS section — all repos employees, after all platforms ──────
+    if (reposRows.length > 0) {
+      const reposTitleRow = values.length;
+      values.push(['REPOS', '', '', '', '']);
+      addMerge(reposTitleRow);
+      colorRow(reposTitleRow, C.amber, true, 12);
+
+      const reposColRow = values.length;
+      values.push(['QUAI', 'TOURNEE', 'HEURE', 'IMMATRICULATION', 'NOM DU LIVREUR']);
+      colorRow(reposColRow, C.amber, true, 11);
+
+      for (const row of reposRows) {
+        const displayNames = row.emps
+          .map((emp) => this.buildDisplayName(emp, firstNameCounts))
+          .join('+');
+        const rRow = values.length;
+        values.push(['', '', 'repos', row.truck, displayNames]);
+        colorCell(rRow, 0, C.cyanDark);
+        colorCell(rRow, 1, C.yellow);
+        colorCell(rRow, 2, C.green);
+        colorCell(rRow, 3, C.yellow);
+        colorCell(rRow, 4, C.yellow);
+      }
+    }
+
+    // Prepend: 1) unmerge all, 2) reset every cell to white — ensures no leftover colors
+    const fullRange = {
+      sheetId: sheetTabId,
+      startRowIndex: 0,
+      endRowIndex: 1000,
+      startColumnIndex: 0,
+      endColumnIndex: COLS,
+    };
+    const cleanupRequests = [
+      { unmergeCells: { range: fullRange } },
+      {
+        repeatCell: {
+          range: fullRange,
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: C.white,
+              textFormat: { bold: false },
+              horizontalAlignment: 'LEFT',
+            },
+          },
+          fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+        },
+      },
+    ];
+    const allRequests = [...cleanupRequests, ...requests];
+
+    // Clear old content
+    await sheetsApi.spreadsheets.values.clear({
+      spreadsheetId,
+      range: sheetTabName,
+    });
+
+    // Write values
+    await sheetsApi.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetTabName}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values },
+    });
+
+    // Column widths: QUAI | TOURNEE | HEURE | IMMATRICULATION | NOM DU LIVREUR
+    const colWidths = [90, 110, 110, 170, 220];
+    colWidths.forEach((pixelSize, i) =>
+      requests.push({
+        updateDimensionProperties: {
+          range: { sheetId: sheetTabId, dimension: 'COLUMNS', startIndex: i, endIndex: i + 1 },
+          properties: { pixelSize },
+          fields: 'pixelSize',
+        },
+      }),
+    );
+
+    // Apply formatting + merges + column widths (cleanup requests run first)
+    await sheetsApi.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: allRequests },
+    });
+
+    this.logger.log(`Exported ${tours.length} tours for ${dateStr} to sheet ${spreadsheetId}`);
+    return { url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}` };
   }
 
   // ── Utilities ───────────────────────────────────────────────────────────────

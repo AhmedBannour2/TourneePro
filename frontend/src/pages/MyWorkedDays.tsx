@@ -278,12 +278,12 @@ export default function MyWorkedDays() {
   const leadingBlanks = firstDow === 0 ? 6 : firstDow - 1; // Monday-first grid
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
 
-  // dayMap: day-of-month → WorkedDay (first)
   const dayMap = useMemo(() => {
     const m = new Map<number, WorkedDay>();
     for (const wd of workedDays ?? []) {
       const d = new Date(wd.date).getUTCDate();
-      if (!m.has(d)) m.set(d, wd);
+      const existing = m.get(d);
+      if (!existing || (existing.status === 'CANCELLED' && wd.status !== 'CANCELLED')) m.set(d, wd);
     }
     return m;
   }, [workedDays]);

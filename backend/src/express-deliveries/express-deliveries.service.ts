@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -12,6 +13,7 @@ import {
   WorkedDayStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateExpressDeliveryDto } from './dto/create-express-delivery.dto';
 import { AssignExpressDeliveryDto } from './dto/assign-express-delivery.dto';
 import { ConfirmExpressDeliveryDto } from './dto/confirm-express-delivery.dto';
@@ -21,7 +23,14 @@ import { GetExpressDeliveriesQueryDto } from './dto/get-express-deliveries-query
 const EXPRESS_PAY: Record<ExpressDeliveryType, number> = {
   STANDARD: 30,
   GV: 50,
+  AUTRE: 0,
 };
+
+function toMissionType(type: ExpressDeliveryType): ExpressMissionType {
+  if (type === ExpressDeliveryType.GV) return ExpressMissionType.GV;
+  if (type === ExpressDeliveryType.AUTRE) return ExpressMissionType.AUTRE;
+  return ExpressMissionType.STANDARD;
+}
 
 const DELIVERY_INCLUDE = {
   createdBy: { select: { id: true, email: true } },
@@ -40,11 +49,19 @@ const DELIVERY_INCLUDE = {
     },
     orderBy: { confirmedAt: 'asc' as const },
   },
+  confirmationPhotos: {
+    orderBy: { uploadedAt: 'asc' as const },
+  },
 } as const;
 
 @Injectable()
 export class ExpressDeliveriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ExpressDeliveriesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   private utcMidnight(date: string | Date): Date {
     const d = new Date(date);
@@ -59,13 +76,16 @@ export class ExpressDeliveriesService {
         type: dto.type,
         date: new Date(dto.date),
         notes: dto.notes ?? null,
+        pay: dto.pay ?? null,
+        startTime: dto.startTime ?? null,
+        endTime: dto.endTime ?? null,
         createdById: userId,
       },
       include: DELIVERY_INCLUDE,
     });
 
     if (dto.employeeIds && dto.employeeIds.length > 0) {
-      await this.doAssign(delivery.id, dto.employeeIds, dto.type, delivery.date, userId);
+      await this.doAssign(delivery.id, dto.employeeIds, dto.type, delivery.date, userId, dto.pay);
       await this.prisma.expressDelivery.update({
         where: { id: delivery.id },
         data: { status: ExpressDeliveryStatus.ASSIGNED },
@@ -120,14 +140,13 @@ export class ExpressDeliveriesService {
   async assign(id: string, dto: AssignExpressDeliveryDto, userId: string) {
     const delivery = await this.findOne(id);
 
-    if (delivery.status === ExpressDeliveryStatus.CONFIRMED) {
-      throw new BadRequestException('Cannot reassign a confirmed express delivery');
-    }
     if (delivery.status === ExpressDeliveryStatus.CANCELLED) {
       throw new BadRequestException('Cannot assign a cancelled express delivery');
     }
 
-    // Remove assignments that are no longer in the new list
+    const isConfirmed = delivery.status === ExpressDeliveryStatus.CONFIRMED;
+
+    // Remove assignments no longer in the list
     const existing = delivery.assignments.map((a) => a.employeeId);
     const toRemove = existing.filter((eid) => !dto.employeeIds.includes(eid));
     if (toRemove.length > 0) {
@@ -136,23 +155,40 @@ export class ExpressDeliveriesService {
       });
     }
 
-    await this.doAssign(id, dto.employeeIds, delivery.type, delivery.date, userId);
+    await this.doAssign(
+      id,
+      dto.employeeIds,
+      delivery.type,
+      delivery.date,
+      userId,
+      delivery.pay ?? undefined,
+      isConfirmed, // skip WorkedDay creation when already confirmed
+    );
 
-    await this.prisma.expressDelivery.update({
-      where: { id },
-      data: { status: ExpressDeliveryStatus.ASSIGNED },
-    });
+    if (!isConfirmed) {
+      await this.prisma.expressDelivery.update({
+        where: { id },
+        data: { status: ExpressDeliveryStatus.ASSIGNED },
+      });
+    }
 
     return this.findOne(id);
   }
 
   // ── Upload photo ───────────────────────────────────────────────────────────
 
-  async savePhoto(id: string, filePath: string) {
+  async savePhoto(id: string, file: Express.Multer.File) {
     await this.findOne(id);
+    const url = await this.cloudinary.uploadBuffer(
+      file.buffer,
+      file.mimetype,
+      `tournee-pro/express/${id}`,
+      file.originalname,
+    );
+    this.logger.log(`Express photo uploaded to Cloudinary: ${url}`);
     await this.prisma.expressDelivery.update({
       where: { id },
-      data: { photo: filePath },
+      data: { photo: url },
     });
     return this.findOne(id);
   }
@@ -217,15 +253,20 @@ export class ExpressDeliveriesService {
 
   async update(id: string, dto: UpdateExpressDeliveryDto) {
     const delivery = await this.findOne(id);
-    if (delivery.status === ExpressDeliveryStatus.CONFIRMED) {
-      throw new BadRequestException('Cannot update a confirmed express delivery');
+
+    if (delivery.status === ExpressDeliveryStatus.CANCELLED) {
+      throw new BadRequestException('Cannot update a cancelled express delivery');
     }
 
     const data: any = {};
     if (dto.type !== undefined) data.type = dto.type;
     if (dto.date !== undefined) data.date = new Date(dto.date);
     if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.pay !== undefined) data.pay = dto.pay;
+    if (dto.startTime !== undefined) data.startTime = dto.startTime;
+    if (dto.endTime !== undefined) data.endTime = dto.endTime;
 
+    if (Object.keys(data).length === 0) return delivery;
     await this.prisma.expressDelivery.update({ where: { id }, data });
     return this.findOne(id);
   }
@@ -236,6 +277,43 @@ export class ExpressDeliveriesService {
     const delivery = await this.findOne(id);
     if (delivery.status === ExpressDeliveryStatus.CONFIRMED) {
       throw new BadRequestException('Cannot cancel a confirmed express delivery');
+    }
+
+    // Remove WorkedDay entries that were created when this delivery was assigned
+    const utcDate = this.utcMidnight(delivery.date);
+    const missionType = toMissionType(delivery.type);
+
+    for (const assignment of delivery.assignments) {
+      const workedDay = await this.prisma.workedDay.findFirst({
+        where: {
+          employeeId: assignment.employee.id,
+          date: utcDate,
+          status: { not: WorkedDayStatus.CANCELLED },
+        },
+        include: { expressMissions: true },
+      });
+
+      if (!workedDay) continue;
+
+      // Match by type + pay (best effort — no FK from ExpressMission to ExpressDelivery)
+      const missionToRemove = workedDay.expressMissions.find(
+        (m) => m.type === missionType && m.pay === assignment.pay,
+      );
+
+      if (!missionToRemove) continue;
+
+      await this.prisma.expressMission.delete({ where: { id: missionToRemove.id } });
+
+      const remaining = workedDay.expressMissions.filter((m) => m.id !== missionToRemove.id);
+
+      // If this WorkedDay existed only for this express mission, delete it entirely
+      if (!workedDay.tourId && workedDay.basePay === 0 && remaining.length === 0) {
+        await this.prisma.workedDay.delete({ where: { id: workedDay.id } });
+      } else {
+        const expressTotal = remaining.reduce((s, m) => s + m.pay, 0);
+        const finalPay = (workedDay.overridePay ?? workedDay.basePay) + expressTotal;
+        await this.prisma.workedDay.update({ where: { id: workedDay.id }, data: { finalPay } });
+      }
     }
 
     await this.prisma.expressDelivery.update({
@@ -272,6 +350,7 @@ export class ExpressDeliveriesService {
                 employee: { select: { id: true, name: true, phone: true } },
               },
             },
+            confirmationPhotos: { orderBy: { uploadedAt: 'asc' } },
           },
         },
       },
@@ -286,13 +365,44 @@ export class ExpressDeliveriesService {
         type: delivery.type,
         date: delivery.date,
         status: delivery.status,
-        photo: delivery.photo,
+        photo: delivery.photo?.startsWith('https://') ? delivery.photo : null,
         notes: delivery.notes,
         pay: a.pay,
+        startTime: delivery.startTime,
+        endTime: delivery.endTime,
         confirmedAt: a.confirmedAt,
         partner: partner ? partner.employee : null,
+        confirmationPhotos: delivery.confirmationPhotos,
       };
     });
+  }
+
+  // ── Confirmation photos ────────────────────────────────────────────────────
+
+  async addConfirmationPhoto(id: string, file: Express.Multer.File) {
+    await this.findOne(id);
+    const url = await this.cloudinary.uploadBuffer(
+      file.buffer,
+      file.mimetype,
+      `tournee-pro/express/${id}/confirmation`,
+      file.originalname,
+    );
+    this.logger.log(`Confirmation photo uploaded: ${url}`);
+    await this.prisma.expressDeliveryPhoto.create({ data: { expressDeliveryId: id, url } });
+    return this.findOne(id);
+  }
+
+  async deleteConfirmationPhoto(id: string, photoId: string) {
+    const photo = await this.prisma.expressDeliveryPhoto.findUnique({ where: { id: photoId } });
+    if (!photo || photo.expressDeliveryId !== id) throw new NotFoundException('Photo not found');
+    await this.cloudinary.deleteByUrl(photo.url);
+    await this.prisma.expressDeliveryPhoto.delete({ where: { id: photoId } });
+  }
+
+  async getConfirmationPhoto(id: string, photoId: string) {
+    const photo = await this.prisma.expressDeliveryPhoto.findUnique({ where: { id: photoId } });
+    if (!photo || photo.expressDeliveryId !== id) throw new NotFoundException('Photo not found');
+    return this.cloudinary.downloadFile(photo.url);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -303,11 +413,12 @@ export class ExpressDeliveriesService {
     type: ExpressDeliveryType,
     date: Date,
     userId: string,
+    customPay?: number,
+    skipWorkedDays = false,
   ) {
-    const pay = EXPRESS_PAY[type];
+    const pay = customPay ?? EXPRESS_PAY[type];
     const utcDate = this.utcMidnight(date);
-    const missionType =
-      type === ExpressDeliveryType.GV ? ExpressMissionType.GV : ExpressMissionType.STANDARD;
+    const missionType = toMissionType(type);
 
     for (const employeeId of employeeIds) {
       const employee = await this.prisma.employee.findUnique({ where: { id: employeeId } });
@@ -316,7 +427,6 @@ export class ExpressDeliveriesService {
         throw new BadRequestException(`Employee ${employee.name} is not active`);
       }
 
-      // Upsert the assignment record
       const existing = await this.prisma.expressAssignment.findUnique({
         where: { expressDeliveryId_employeeId: { expressDeliveryId: deliveryId, employeeId } },
       });
@@ -326,15 +436,16 @@ export class ExpressDeliveriesService {
           data: { expressDeliveryId: deliveryId, employeeId, pay },
         });
 
-        // Integrate with WorkedDay
-        await this.integrateWithWorkedDay(
-          employeeId,
-          employee.role,
-          utcDate,
-          missionType,
-          pay,
-          userId,
-        );
+        if (!skipWorkedDays) {
+          await this.integrateWithWorkedDay(
+            employeeId,
+            employee.role,
+            utcDate,
+            missionType,
+            pay,
+            userId,
+          );
+        }
       }
     }
   }

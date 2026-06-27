@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EmployeesService } from './employees.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { NotFoundException } from '@nestjs/common';
 import { EmployeeRole } from './dto/create-employee.dto';
 
@@ -35,6 +36,10 @@ describe('EmployeesService', () => {
       providers: [
         EmployeesService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: CloudinaryService,
+          useValue: { uploadBuffer: jest.fn(), deleteByUrl: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -48,7 +53,12 @@ describe('EmployeesService', () => {
 
   describe('create', () => {
     it('should create an employee', async () => {
-      const dto = { firstName: 'Jean', lastName: 'Dupont', role: EmployeeRole.CHAUFFEUR, phone: '+33612345678' };
+      const dto = {
+        firstName: 'Jean',
+        lastName: 'Dupont',
+        role: EmployeeRole.CHAUFFEUR,
+        phone: '+33612345678',
+      };
       mockPrismaService.employee.create.mockResolvedValue(mockEmployee);
       const result = await service.create(dto);
       expect(result).toEqual(mockEmployee);

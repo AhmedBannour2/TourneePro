@@ -52,6 +52,15 @@ interface GlobalPayRate {
   updatedBy: { id: string; email: string } | null;
 }
 
+interface PlatformPayRate {
+  platformId: string;
+  platformName: string;
+  chauffeurRate: number;
+  aideRate: number | null;
+  updatedAt: string | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
 const TOUR_TYPES_ORDER = ['STANDARD', 'GV', 'INSTALL', 'MONO', 'SPECIAL'] as const;
 const TOUR_TYPE_LABELS: Record<string, string> = {
   STANDARD: 'Standard',
@@ -577,6 +586,9 @@ export default function Settings() {
   const [globalRatesMsg, setGlobalRatesMsg] = useState({ ok: false, msg: '' });
   const [globalRatesSaving, setGlobalRatesSaving] = useState(false);
 
+  // Platform pay rates state (admin only)
+  const [platformRates, setPlatformRates] = useState<Record<string, { chauffeurRate: string; aideRate: string }>>({});
+
   // ── Profile form ──────────────────────────────────────────────────────────
 
   const {
@@ -624,6 +636,12 @@ export default function Settings() {
     enabled: !isEmployee,
   });
 
+  const { data: platformPayRates, isLoading: platformRatesLoading } = useQuery<PlatformPayRate[]>({
+    queryKey: ['platform-pay-rates'],
+    queryFn: () => api.get<PlatformPayRate[]>('/settings/platform-pay-rates').then((r) => r.data),
+    enabled: !isEmployee,
+  });
+
   // Pre-fill profile form when data loads
   useEffect(() => {
     if (profile) {
@@ -655,6 +673,18 @@ export default function Settings() {
     setGlobalRates(map);
     setGlobalRatesMeta({ updatedAt: latestAt, email: latestEmail });
   }, [globalPayRates]);
+
+  useEffect(() => {
+    if (!platformPayRates) return;
+    const map: Record<string, { chauffeurRate: string; aideRate: string }> = {};
+    for (const r of platformPayRates) {
+      map[r.platformId] = {
+        chauffeurRate: String(r.chauffeurRate),
+        aideRate: r.aideRate != null ? String(r.aideRate) : '',
+      };
+    }
+    setPlatformRates(map);
+  }, [platformPayRates]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -736,17 +766,28 @@ export default function Settings() {
     }
   };
 
-  const handleSaveGlobalRates = async () => {
+  const handleSaveAllRates = async () => {
     setGlobalRatesSaving(true);
     setGlobalRatesMsg({ ok: false, msg: '' });
     try {
-      const rates = TOUR_TYPES_ORDER.map((tt) => ({
+      const tourRates = TOUR_TYPES_ORDER.map((tt) => ({
         tourType: tt,
         chauffeurRate: parseFloat(globalRates[tt]?.chauffeurRate || '0') || 0,
         aideRate: globalRates[tt]?.aideRate !== '' ? parseFloat(globalRates[tt]?.aideRate || '') || null : null,
       }));
-      await api.put('/settings/pay-rates', { rates });
+      const platRates = (platformPayRates ?? []).map((p) => ({
+        platformId: p.platformId,
+        chauffeurRate: parseFloat(platformRates[p.platformId]?.chauffeurRate || '0') || 0,
+        aideRate: platformRates[p.platformId]?.aideRate !== ''
+          ? parseFloat(platformRates[p.platformId]?.aideRate || '') || null
+          : null,
+      }));
+      await Promise.all([
+        api.put('/settings/pay-rates', { rates: tourRates }),
+        ...(platRates.length > 0 ? [api.put('/settings/platform-pay-rates', { rates: platRates })] : []),
+      ]);
       queryClient.invalidateQueries({ queryKey: ['global-pay-rates'] });
+      queryClient.invalidateQueries({ queryKey: ['platform-pay-rates'] });
       setGlobalRatesMsg({ ok: true, msg: 'Tarifs enregistrés.' });
     } catch (err: any) {
       setGlobalRatesMsg({ ok: false, msg: err.response?.data?.message || 'Erreur enregistrement.' });
@@ -1107,7 +1148,7 @@ export default function Settings() {
           <TabsContent value="data" className="space-y-6">
             <ImportCard />
 
-            {/* Global pay rates */}
+            {/* Unified pay rates table */}
             <Card className="p-6 space-y-4">
               <h2 className="font-semibold text-gray-800">Tarifs par défaut</h2>
               <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
@@ -1117,9 +1158,9 @@ export default function Settings() {
                   Les journées déjà enregistrées ne sont pas modifiées.
                 </span>
               </div>
-              {globalRatesLoading ? (
+              {globalRatesLoading || platformRatesLoading ? (
                 <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                  {[...Array(7)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
                 </div>
               ) : (
                 <>
@@ -1127,7 +1168,7 @@ export default function Settings() {
                     <table className="w-full text-xs sm:text-sm">
                       <thead>
                         <tr className="text-xs text-gray-500 border-b bg-muted/50">
-                          <th className="text-left py-2 sm:py-3 px-2 sm:px-4 font-medium">Type</th>
+                          <th className="text-left py-2 sm:py-3 px-2 sm:px-4 font-medium">Type / Plateforme</th>
                           <th className="text-center py-2 sm:py-3 px-2 sm:px-4 font-medium whitespace-nowrap">Chauffeur (€)</th>
                           <th className="text-center py-2 sm:py-3 px-2 sm:px-4 font-medium whitespace-nowrap">Aide (€)</th>
                         </tr>
@@ -1176,11 +1217,53 @@ export default function Settings() {
                             </tr>
                           );
                         })}
+                        {(platformPayRates ?? []).map((p) => {
+                          const vals = platformRates[p.platformId] ?? { chauffeurRate: '0', aideRate: '' };
+                          return (
+                            <tr key={p.platformId} className="hover:bg-muted/50">
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium">{p.platformName}</td>
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={vals.chauffeurRate}
+                                  onChange={(e) =>
+                                    setPlatformRates((prev) => ({
+                                      ...prev,
+                                      [p.platformId]: { ...vals, chauffeurRate: e.target.value },
+                                    }))
+                                  }
+                                  className="w-16 sm:w-20 border rounded px-1.5 sm:px-2 py-1 text-center text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </td>
+                              <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={vals.aideRate}
+                                  onChange={(e) =>
+                                    setPlatformRates((prev) => ({
+                                      ...prev,
+                                      [p.platformId]: { ...vals, aideRate: e.target.value },
+                                    }))
+                                  }
+                                  className="w-16 sm:w-20 border rounded px-1.5 sm:px-2 py-1 text-center text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                   <div className="flex flex-col gap-3 pt-2">
-                    <Button onClick={handleSaveGlobalRates} disabled={globalRatesSaving} className="w-full sm:w-fit text-xs sm:text-sm">
+                    <Button
+                      onClick={handleSaveAllRates}
+                      disabled={globalRatesSaving}
+                      className="w-full sm:w-fit text-xs sm:text-sm"
+                    >
                       {globalRatesSaving ? (
                         <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
                       ) : (

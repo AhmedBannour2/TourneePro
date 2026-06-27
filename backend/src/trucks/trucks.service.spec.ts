@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TrucksService } from './trucks.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notification/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -45,6 +47,11 @@ describe('TrucksService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: MailService, useValue: mockMailService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: NotificationsService, useValue: { notify: jest.fn() } },
+        {
+          provide: CloudinaryService,
+          useValue: { uploadBuffer: jest.fn(), deleteByUrl: jest.fn() },
+        },
       ],
     }).compile();
 

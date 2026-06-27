@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   UserPlus, Pencil, UserX, UserCheck, KeyRound, ShieldCheck,
   Phone, MapPin, Calendar, Truck as TruckIcon, Search,
-  Upload, Download, Trash2, FileText, Loader2, User, DollarSign,
+  Upload, Download, Trash2, FileText, Loader2, User, DollarSign, Eye, ImageIcon,
 } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { api } from '@/lib/api';
@@ -47,6 +47,7 @@ interface EmployeeDocument {
   originalName: string;
   fileType: 'ID' | 'PASSPORT' | 'CV' | 'OTHER';
   mimeType: string;
+  filePath: string | null;
   uploadedAt: string;
   uploadedBy: { email: string } | null;
 }
@@ -65,6 +66,14 @@ interface PayRate {
   isCustomAide: boolean;
   systemChauffeurRate: number;
   systemAideRate: number | null;
+}
+
+interface PlatformPayRateRow {
+  platformId: string;
+  platformName: string;
+  chauffeurRate: number;
+  aideRate: number | null;
+  isOverride: boolean;
 }
 
 const TOUR_TYPE_LABELS: Record<TourType, string> = {
@@ -154,8 +163,14 @@ export default function Employees() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
+  // Document preview state
+  const [previewDoc, setPreviewDoc] = useState<EmployeeDocument | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   // Pay rate editing state
   const [editingRates, setEditingRates] = useState<Record<string, { chauffeurRate: string; aideRate: string }>>({});
+  const [editingPlatformRates, setEditingPlatformRates] = useState<Record<string, { chauffeurRate: string; aideRate: string }>>({});
 
   // ── Employee form ────────────────────────────────────────────────────────────
 
@@ -204,6 +219,13 @@ export default function Employees() {
     queryKey: ['employee-pay-rates', panelEmployee?.id],
     queryFn: () =>
       api.get<PayRate[]>(`/employees/${panelEmployee!.id}/pay-rates`).then((r) => r.data),
+    enabled: !!panelEmployee,
+  });
+
+  const { data: platformPayRates, isLoading: platformRatesLoading } = useQuery<PlatformPayRateRow[]>({
+    queryKey: ['employee-platform-pay-rates', panelEmployee?.id],
+    queryFn: () =>
+      api.get<PlatformPayRateRow[]>(`/employees/${panelEmployee!.id}/platform-pay-rates`).then((r) => r.data),
     enabled: !!panelEmployee,
   });
 
@@ -312,6 +334,17 @@ export default function Employees() {
     onError: (e: any) => error(e.response?.data?.message || 'Erreur enregistrement'),
   });
 
+  const savePlatformRatesMutation = useMutation({
+    mutationFn: (rates: { platformId: string; chauffeurRate: number; aideRate?: number | null }[]) =>
+      api.put(`/employees/${panelEmployee!.id}/platform-pay-rates`, { rates }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee-platform-pay-rates', panelEmployee?.id] });
+      setEditingPlatformRates({});
+      success('Tarifs plateforme enregistrés');
+    },
+    onError: (e: any) => error(e.response?.data?.message || 'Erreur enregistrement'),
+  });
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   const openCreate = () => {
@@ -388,6 +421,30 @@ export default function Employees() {
     } catch {
       error('Erreur téléchargement');
     }
+  };
+
+  const openPreview = async (doc: EmployeeDocument) => {
+    if (!panelEmployee) return;
+    setPreviewDoc(doc);
+    setPreviewUrl(null);
+    setPreviewLoading(true);
+    try {
+      const res = await api.get(
+        `/employees/${panelEmployee.id}/documents/${doc.id}/download`,
+        { responseType: 'blob' },
+      );
+      setPreviewUrl(URL.createObjectURL(res.data));
+    } catch {
+      error('Impossible de charger le document');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewDoc(null);
+    setPreviewUrl(null);
   };
 
   // Reset upload state when panel closes
@@ -892,37 +949,47 @@ export default function Employees() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {documents.map((doc) => (
-                        <div key={doc.id} className="border rounded-lg p-3 flex items-start gap-3 bg-white">
-                          <FileText className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{doc.originalName}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <Badge className={`text-xs ${DOC_TYPE_COLORS[doc.fileType] ?? ''}`}>
-                                {DOC_TYPE_OPTIONS.find((t) => t.value === doc.fileType)?.label ?? doc.fileType}
-                              </Badge>
-                              <span className="text-xs text-gray-400">
-                                {new Date(doc.uploadedAt).toLocaleDateString('fr-FR')}
-                              </span>
+                      {documents.map((doc) => {
+                        const isImage = doc.mimeType.startsWith('image/');
+                        return (
+                          <div key={doc.id} className="border rounded-lg p-3 flex items-center gap-3 bg-white">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isImage ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                              {isImage
+                                ? <ImageIcon className="w-5 h-5 text-blue-400" />
+                                : <FileText className="w-5 h-5 text-gray-400" />}
                             </div>
-                            {doc.uploadedBy && (
-                              <p className="text-xs text-gray-400 mt-0.5">par {doc.uploadedBy.email}</p>
-                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Badge className={`text-xs ${DOC_TYPE_COLORS[doc.fileType] ?? ''}`}>
+                                  {DOC_TYPE_OPTIONS.find((t) => t.value === doc.fileType)?.label ?? doc.fileType}
+                                </Badge>
+                                <span className="text-xs text-gray-400">
+                                  {new Date(doc.uploadedAt).toLocaleDateString('fr-FR')}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-400 truncate mt-0.5">{doc.originalName}</p>
+                              {doc.uploadedBy && (
+                                <p className="text-xs text-gray-300 mt-0.5">par {doc.uploadedBy.email}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button variant="ghost" size="sm" title="Aperçu" onClick={() => openPreview(doc)}>
+                                <Eye className="w-4 h-4 text-gray-500" />
+                              </Button>
+                              <Button variant="ghost" size="sm" title="Télécharger" onClick={() => handleDownload(doc)}>
+                                <Download className="w-4 h-4 text-indigo-600" />
+                              </Button>
+                              <Button
+                                variant="ghost" size="sm" title="Supprimer"
+                                onClick={() => deleteDocMutation.mutate({ empId: panelEmployee.id, docId: doc.id })}
+                                disabled={deleteDocMutation.isPending}
+                              >
+                                <Trash2 className="w-4 h-4 text-red-500" />
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button variant="ghost" size="sm" title="Télécharger" onClick={() => handleDownload(doc)}>
-                              <Download className="w-4 h-4 text-indigo-600" />
-                            </Button>
-                            <Button
-                              variant="ghost" size="sm" title="Supprimer"
-                              onClick={() => deleteDocMutation.mutate({ empId: panelEmployee.id, docId: doc.id })}
-                              disabled={deleteDocMutation.isPending}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </TabsContent>
@@ -934,16 +1001,16 @@ export default function Employees() {
                     Les tournées existantes ne sont pas modifiées.
                   </p>
 
-                  {ratesLoading ? (
+                  {ratesLoading || platformRatesLoading ? (
                     <div className="space-y-2">
-                      {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+                      {[...Array(7)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
                     </div>
                   ) : (
                     <>
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-xs text-gray-500 border-b">
-                            <th className="text-left py-2 font-medium">Type</th>
+                            <th className="text-left py-2 font-medium">Type / Plateforme</th>
                             <th className="text-center py-2 font-medium">Chauffeur (€)</th>
                             <th className="text-center py-2 font-medium">Aide (€)</th>
                           </tr>
@@ -955,44 +1022,20 @@ export default function Employees() {
                               chauffeurRate: String(r.chauffeurRate),
                               aideRate: r.aideRate != null ? String(r.aideRate) : '',
                             };
-
                             return (
                               <tr key={r.tourType} className="group">
                                 <td className="py-2 font-medium">{TOUR_TYPE_LABELS[r.tourType]}</td>
                                 <td className="py-2 text-center">
                                   {isEditing ? (
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={editVals.chauffeurRate}
-                                      onChange={(e) =>
-                                        setEditingRates((prev) => ({
-                                          ...prev,
-                                          [r.tourType]: { ...editVals, chauffeurRate: e.target.value },
-                                        }))
-                                      }
+                                    <input type="number" min="0" step="1" value={editVals.chauffeurRate}
+                                      onChange={(e) => setEditingRates((prev) => ({ ...prev, [r.tourType]: { ...editVals, chauffeurRate: e.target.value } }))}
                                       className="w-20 border rounded px-2 py-1 text-center text-sm"
                                     />
                                   ) : (
-                                    <button
-                                      onClick={() =>
-                                        setEditingRates((prev) => ({
-                                          ...prev,
-                                          [r.tourType]: {
-                                            chauffeurRate: String(r.chauffeurRate),
-                                            aideRate: r.aideRate != null ? String(r.aideRate) : '',
-                                          },
-                                        }))
-                                      }
-                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group"
-                                    >
+                                    <button onClick={() => setEditingRates((prev) => ({ ...prev, [r.tourType]: { chauffeurRate: String(r.chauffeurRate), aideRate: r.aideRate != null ? String(r.aideRate) : '' } }))}
+                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group">
                                       <span>{r.chauffeurRate}€</span>
-                                      {r.isCustomChauffeur ? (
-                                        <span className="text-xs text-blue-500">(personnalisé)</span>
-                                      ) : (
-                                        <span className="text-xs text-gray-400">(défaut)</span>
-                                      )}
+                                      <span className={`text-xs ${r.isCustomChauffeur ? 'text-blue-500' : 'text-gray-400'}`}>{r.isCustomChauffeur ? '(personnalisé)' : '(défaut)'}</span>
                                       <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
                                     </button>
                                   )}
@@ -1001,40 +1044,57 @@ export default function Employees() {
                                   {r.systemAideRate == null ? (
                                     <span className="text-gray-300">—</span>
                                   ) : isEditing ? (
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={editVals.aideRate}
-                                      onChange={(e) =>
-                                        setEditingRates((prev) => ({
-                                          ...prev,
-                                          [r.tourType]: { ...editVals, aideRate: e.target.value },
-                                        }))
-                                      }
+                                    <input type="number" min="0" step="1" value={editVals.aideRate}
+                                      onChange={(e) => setEditingRates((prev) => ({ ...prev, [r.tourType]: { ...editVals, aideRate: e.target.value } }))}
                                       className="w-20 border rounded px-2 py-1 text-center text-sm"
                                     />
                                   ) : (
-                                    <button
-                                      onClick={() =>
-                                        setEditingRates((prev) => ({
-                                          ...prev,
-                                          [r.tourType]: {
-                                            chauffeurRate: String(r.chauffeurRate),
-                                            aideRate: r.aideRate != null ? String(r.aideRate) : '',
-                                          },
-                                        }))
-                                      }
-                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group"
-                                    >
-                                      <span>
-                                        {r.aideRate != null ? `${r.aideRate}€` : `${r.systemAideRate}€`}
-                                      </span>
-                                      {r.isCustomAide ? (
-                                        <span className="text-xs text-blue-500">(personnalisé)</span>
-                                      ) : (
-                                        <span className="text-xs text-gray-400">(défaut)</span>
-                                      )}
+                                    <button onClick={() => setEditingRates((prev) => ({ ...prev, [r.tourType]: { chauffeurRate: String(r.chauffeurRate), aideRate: r.aideRate != null ? String(r.aideRate) : '' } }))}
+                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group">
+                                      <span>{r.aideRate != null ? `${r.aideRate}€` : `${r.systemAideRate}€`}</span>
+                                      <span className={`text-xs ${r.isCustomAide ? 'text-blue-500' : 'text-gray-400'}`}>{r.isCustomAide ? '(personnalisé)' : '(défaut)'}</span>
+                                      <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {(platformPayRates ?? []).map((p) => {
+                            const isEditing = !!editingPlatformRates[p.platformId];
+                            const editVals = editingPlatformRates[p.platformId] ?? {
+                              chauffeurRate: String(p.chauffeurRate),
+                              aideRate: p.aideRate != null ? String(p.aideRate) : '',
+                            };
+                            return (
+                              <tr key={p.platformId} className="group">
+                                <td className="py-2 font-medium">{p.platformName}</td>
+                                <td className="py-2 text-center">
+                                  {isEditing ? (
+                                    <input type="number" min="0" step="1" value={editVals.chauffeurRate}
+                                      onChange={(e) => setEditingPlatformRates((prev) => ({ ...prev, [p.platformId]: { ...editVals, chauffeurRate: e.target.value } }))}
+                                      className="w-20 border rounded px-2 py-1 text-center text-sm"
+                                    />
+                                  ) : (
+                                    <button onClick={() => setEditingPlatformRates((prev) => ({ ...prev, [p.platformId]: { chauffeurRate: String(p.chauffeurRate), aideRate: p.aideRate != null ? String(p.aideRate) : '' } }))}
+                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group">
+                                      <span>{p.chauffeurRate}€</span>
+                                      <span className={`text-xs ${p.isOverride ? 'text-blue-500' : 'text-gray-400'}`}>{p.isOverride ? '(personnalisé)' : '(défaut)'}</span>
+                                      <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
+                                    </button>
+                                  )}
+                                </td>
+                                <td className="py-2 text-center">
+                                  {isEditing ? (
+                                    <input type="number" min="0" step="1" value={editVals.aideRate}
+                                      onChange={(e) => setEditingPlatformRates((prev) => ({ ...prev, [p.platformId]: { ...editVals, aideRate: e.target.value } }))}
+                                      className="w-20 border rounded px-2 py-1 text-center text-sm"
+                                    />
+                                  ) : (
+                                    <button onClick={() => setEditingPlatformRates((prev) => ({ ...prev, [p.platformId]: { chauffeurRate: String(p.chauffeurRate), aideRate: p.aideRate != null ? String(p.aideRate) : '' } }))}
+                                      className="flex items-center justify-center gap-1 w-full hover:text-blue-600 group">
+                                      <span>{p.aideRate != null ? `${p.aideRate}€` : '—'}</span>
+                                      {p.aideRate != null && <span className={`text-xs ${p.isOverride ? 'text-blue-500' : 'text-gray-400'}`}>{p.isOverride ? '(personnalisé)' : '(défaut)'}</span>}
                                       <Pencil size={11} className="opacity-0 group-hover:opacity-100 text-gray-400" />
                                     </button>
                                   )}
@@ -1045,32 +1105,38 @@ export default function Employees() {
                         </tbody>
                       </table>
 
-                      {Object.keys(editingRates).length > 0 && (
+                      {(Object.keys(editingRates).length > 0 || Object.keys(editingPlatformRates).length > 0) && (
                         <div className="flex gap-2 pt-2 border-t">
-                          <Button
-                            size="sm"
-                            className="flex-1"
-                            disabled={savePayRatesMutation.isPending}
+                          <Button size="sm" className="flex-1"
+                            disabled={savePayRatesMutation.isPending || savePlatformRatesMutation.isPending}
                             onClick={() => {
-                              const rates = Object.entries(editingRates).map(([tourType, vals]) => ({
-                                tourType,
-                                chauffeurRate: parseFloat(vals.chauffeurRate) || 0,
-                                aideRate: vals.aideRate !== '' ? parseFloat(vals.aideRate) : null,
-                              }));
-                              savePayRatesMutation.mutate(rates);
+                              if (Object.keys(editingRates).length > 0) {
+                                const rates = Object.entries(editingRates).map(([tourType, vals]) => ({
+                                  tourType,
+                                  chauffeurRate: parseFloat(vals.chauffeurRate) || 0,
+                                  aideRate: vals.aideRate !== '' ? parseFloat(vals.aideRate) : null,
+                                }));
+                                savePayRatesMutation.mutate(rates);
+                              }
+                              if (Object.keys(editingPlatformRates).length > 0) {
+                                const rates = Object.entries(editingPlatformRates).map(([platformId, vals]) => ({
+                                  platformId,
+                                  chauffeurRate: parseFloat(vals.chauffeurRate) || 0,
+                                  aideRate: vals.aideRate !== '' ? parseFloat(vals.aideRate) : null,
+                                }));
+                                savePlatformRatesMutation.mutate(rates);
+                              }
                             }}
                           >
-                            {savePayRatesMutation.isPending ? (
+                            {savePayRatesMutation.isPending || savePlatformRatesMutation.isPending ? (
                               <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Enregistrement...</>
                             ) : (
                               'Enregistrer les tarifs'
                             )}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditingRates({})}
-                            disabled={savePayRatesMutation.isPending}
+                          <Button size="sm" variant="outline"
+                            onClick={() => { setEditingRates({}); setEditingPlatformRates({}); }}
+                            disabled={savePayRatesMutation.isPending || savePlatformRatesMutation.isPending}
                           >
                             Annuler
                           </Button>
@@ -1084,6 +1150,43 @@ export default function Employees() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Document preview dialog */}
+      <Dialog open={!!previewDoc} onOpenChange={(open) => { if (!open) closePreview(); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {previewDoc && (DOC_TYPE_OPTIONS.find((t) => t.value === previewDoc.fileType)?.label ?? previewDoc.fileType)}
+              <span className="ml-2 text-sm font-normal text-gray-400 truncate">{previewDoc?.originalName}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-center min-h-48 max-h-[75vh]">
+            {previewLoading ? (
+              <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+            ) : previewUrl ? (
+              previewDoc?.mimeType === 'application/pdf' ? (
+                <div className="flex flex-col items-center gap-4 py-10">
+                  <svg className="w-16 h-16 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+                    <text x="7" y="17" fontSize="4" fill="white" fontWeight="bold">PDF</text>
+                  </svg>
+                  <p className="text-sm text-gray-500 truncate max-w-xs">{previewDoc?.originalName}</p>
+                  <button
+                    onClick={() => window.open(previewUrl, '_blank')}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    Ouvrir le PDF
+                  </button>
+                </div>
+              ) : (
+                <img src={previewUrl} alt="Document" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
+              )
+            ) : (
+              <p className="text-gray-400 text-sm">Impossible de charger le document.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

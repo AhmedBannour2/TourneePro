@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import {
   Calendar, Truck, Users, Clock, Phone,
-  CheckCircle2, ClipboardCheck, History, Zap, Camera,
-  AlertTriangle, X, Loader2,
+  CheckCircle2, ClipboardCheck, History, Zap, Camera, Upload, X, Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
@@ -41,40 +40,28 @@ interface AssignmentsResponse {
   history: TourItem[];
 }
 
-type ExpressType   = 'STANDARD' | 'GV';
+type ExpressType   = 'STANDARD' | 'GV' | 'AUTRE';
 type ExpressStatus = 'PENDING' | 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
+
+interface ConfirmationPhoto {
+  id: string; url: string; uploadedAt: string;
+}
 
 interface ExpressItem {
   id: string; type: ExpressType; date: string; status: ExpressStatus;
   photo: string | null; notes: string | null;
+  startTime: string | null; endTime: string | null;
   pay: number; confirmedAt: string | null;
   partner: { id: string; name: string; phone: string | null } | null;
+  confirmationPhotos: ConfirmationPhoto[];
 }
-
-interface PendingInspection {
-  id: string;
-  scheduledDate: string;
-  truck: { id: string; immatriculation: string };
-  assignedTo: { id: string; name: string };
-}
-
-const CHECKLIST_ITEMS = [
-  { key: 'HUILE',        label: "Niveau d'huile" },
-  { key: 'RADIATEUR',    label: 'Eau du radiateur' },
-  { key: 'CAISSE_OUTILS',label: 'Caisse à outils' },
-  { key: 'CHARIOT',      label: 'Chariot' },
-  { key: 'ROULETTES',    label: 'Roulettes' },
-  { key: 'COUVERCLE',    label: 'Couvercle de produit' },
-] as const;
-
-type CheckKey = typeof CHECKLIST_ITEMS[number]['key'];
-type CheckStatus = 'OK' | 'PROBLEME';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const EXPRESS_TYPE_CONFIG: Record<ExpressType, { label: string; cls: string }> = {
   STANDARD: { label: 'Standard', cls: 'bg-blue-100 text-blue-800' },
   GV:       { label: 'GV',       cls: 'bg-violet-100 text-violet-800' },
+  AUTRE:    { label: 'Autre',    cls: 'bg-orange-100 text-orange-800' },
 };
 
 // ── Confirm modal (tours) ──────────────────────────────────────────────────────
@@ -249,17 +236,40 @@ function ExpressConfirmModal({ item, onClose, onSaved }: {
   item: ExpressItem; onClose: () => void; onSaved: () => void;
 }) {
   const [notes, setNotes] = useState('');
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const { success, error, toasts, removeToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    setPhotoFiles(prev => [...prev, ...Array.from(files)]);
+  };
+
+  const removeFile = (idx: number) =>
+    setPhotoFiles(prev => prev.filter((_, i) => i !== idx));
 
   const mut = useMutation({
-    mutationFn: () => api.post(`/express/${item.id}/confirm`, { notes: notes || undefined }),
-    onSuccess: () => { success('Mission express confirmée !'); onSaved(); onClose(); },
+    mutationFn: async () => {
+      await api.post(`/express/${item.id}/confirm`, { notes: notes || undefined });
+      for (const file of photoFiles) {
+        const form = new FormData();
+        form.append('file', file);
+        await api.post(`/express/${item.id}/confirmation-photos`, form, {
+          headers: { 'Content-Type': undefined as unknown as string },
+        });
+      }
+    },
+    onSuccess: () => {
+      success('Mission express confirmée !');
+      queryClient.invalidateQueries({ queryKey: ['my-express'] });
+      onSaved();
+      onClose();
+    },
     onError: (e: any) => error(e.response?.data?.message || 'Erreur'),
   });
 
   const typeConf = EXPRESS_TYPE_CONFIG[item.type];
   const dateStr = new Date(item.date).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
-  const timeStr = new Date(item.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
   return (
     <>
@@ -271,9 +281,12 @@ function ExpressConfirmModal({ item, onClose, onSaved }: {
               <Zap size={18} className="text-yellow-500" />
               Confirmer la mission express
             </DialogTitle>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <Badge className={typeConf.cls}>{typeConf.label}</Badge>
-              <span className="text-sm text-gray-500">{dateStr} · {timeStr}</span>
+              <span className="text-sm text-gray-500">{dateStr}</span>
+              {(item.startTime || item.endTime) && (
+                <span className="text-sm text-gray-500">{item.startTime ?? '?'} → {item.endTime ?? '?'}</span>
+              )}
             </div>
           </DialogHeader>
 
@@ -281,26 +294,42 @@ function ExpressConfirmModal({ item, onClose, onSaved }: {
             <div className="bg-blue-50 rounded-lg px-4 py-3 text-sm text-blue-800">
               Rémunération : <span className="font-bold">{item.pay}€</span>
             </div>
+
+            {/* Multiple photos */}
+            <div>
+              <Label>Photos de mission <span className="text-gray-400 font-normal">(optionnel, plusieurs possibles)</span></Label>
+              <div className="mt-1 space-y-1">
+                {photoFiles.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm bg-gray-50 rounded px-2 py-1">
+                    <Camera size={12} className="text-gray-400 shrink-0" />
+                    <span className="flex-1 truncate text-xs">{f.name}</span>
+                    <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 shrink-0">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                <input type="file" accept=".jpg,.jpeg,.png,.pdf" id="confirm-photos" className="hidden" multiple
+                  onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+                <label htmlFor="confirm-photos"
+                  className="cursor-pointer flex items-center gap-1.5 text-sm border border-dashed border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 w-full">
+                  <Upload size={14} /> Ajouter des photos
+                </label>
+              </div>
+            </div>
+
             <div>
               <Label>Notes (optionnel)</Label>
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Observations…"
-                rows={2}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-              />
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder="Observations…" rows={2}
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>Annuler</Button>
-            <Button
-              onClick={() => mut.mutate()}
-              disabled={mut.isPending}
-              className="bg-green-600 hover:bg-green-700 text-white"
-            >
-              {mut.isPending ? 'Confirmation…' : 'Confirmer ✓'}
+            <Button onClick={() => mut.mutate()} disabled={mut.isPending}
+              className="bg-green-600 hover:bg-green-700 text-white">
+              {mut.isPending ? <><Loader2 size={13} className="mr-1 animate-spin" /> Confirmation…</> : 'Confirmer ✓'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -314,7 +343,7 @@ function ExpressConfirmModal({ item, onClose, onSaved }: {
 function ExpressCard({ item, onConfirm, onViewPhoto }: {
   item: ExpressItem;
   onConfirm: (i: ExpressItem) => void;
-  onViewPhoto: (id: string) => void;
+  onViewPhoto: (id: string, notes: string | null) => void;
 }) {
   const confirmed = item.status === 'CONFIRMED' || !!item.confirmedAt;
   const tc = EXPRESS_TYPE_CONFIG[item.type];
@@ -336,6 +365,12 @@ function ExpressCard({ item, onConfirm, onViewPhoto }: {
 
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-gray-600">
             <span className="font-semibold text-blue-700">{item.pay}€</span>
+            {(item.startTime || item.endTime) && (
+              <span className="flex items-center gap-1 text-gray-500">
+                <Clock size={13} className="text-gray-400" />
+                {item.startTime ?? '?'} → {item.endTime ?? '?'}
+              </span>
+            )}
             {item.partner && (
               <span className="flex items-center gap-1">
                 <Users size={13} className="text-gray-400" /> {item.partner.name}
@@ -365,304 +400,241 @@ function ExpressCard({ item, onConfirm, onViewPhoto }: {
               <ClipboardCheck size={13} className="mr-1" /> Confirmer
             </Button>
           )}
-          {item.photo && (
-            <Button size="sm" variant="outline" onClick={() => onViewPhoto(item.id)}
-              className="text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
-              <Camera size={13} className="mr-1" /> Voir les détails de la livraison
-            </Button>
-          )}
+          <Button size="sm" variant="outline" onClick={() => onViewPhoto(item.id, item.notes)}
+            className="text-xs border-blue-200 text-blue-700 hover:bg-blue-50">
+            <Camera size={13} className="mr-1" />
+            {(item.confirmationPhotos ?? []).length > 0 ? `Photos (${(item.confirmationPhotos ?? []).length})` : 'Photos / Doc'}
+          </Button>
         </div>
       </div>
     </Card>
   );
 }
 
-// ── Photo lightbox ─────────────────────────────────────────────────────────────
+// ── Confirmation photo thumbnail (employee view) ───────────────────────────────
 
-function PhotoLightbox({ deliveryId, onClose }: { deliveryId: string; onClose: () => void }) {
+function EmployeeConfirmThumb({ deliveryId, photo, onDelete }: {
+  deliveryId: string;
+  photo: ConfirmationPhoto;
+  onDelete: () => void;
+}) {
   const [src, setSrc] = useState<string | null>(null);
+  const [mime, setMime] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/express/${deliveryId}/confirmation-photos/${photo.id}`, { responseType: 'blob' })
+      .then(r => { setMime(r.data.type); setSrc(URL.createObjectURL(r.data)); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [deliveryId, photo.id]);
+
+  return (
+    <div className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50" style={{ aspectRatio: '4/3' }}>
+      {loading ? (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Loader2 size={14} className="animate-spin text-gray-300" />
+        </div>
+      ) : src ? (
+        mime === 'application/pdf' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer" onClick={() => window.open(src, '_blank')}>
+            <svg className="w-8 h-8 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+            </svg>
+            <span className="text-xs text-blue-600">PDF</span>
+          </div>
+        ) : (
+          <img src={src} alt="Mission" className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+            onClick={() => window.open(src, '_blank')} />
+        )
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Camera size={16} className="text-gray-300" />
+        </div>
+      )}
+      <button onClick={onDelete}
+        className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
+        <X size={10} />
+      </button>
+    </div>
+  );
+}
+
+// ── Photo lightbox (employee) ──────────────────────────────────────────────────
+
+function AdminDocThumb({ deliveryId }: { deliveryId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [mime, setMime] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get(`/express/${deliveryId}/photo`, { responseType: 'blob' })
-      .then(r => setSrc(URL.createObjectURL(r.data)))
-      .catch(() => setSrc(null))
+      .then(r => { setMime(r.data.type); setSrc(URL.createObjectURL(r.data)); })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [deliveryId]);
 
+  if (loading) return (
+    <div className="flex items-center justify-center h-16 bg-gray-50 rounded-lg border border-gray-200">
+      <Loader2 size={16} className="animate-spin text-gray-300" />
+    </div>
+  );
+  if (!src) return null;
+
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Photo de la mission express</DialogTitle>
-        </DialogHeader>
-        <div className="flex items-center justify-center min-h-48">
-          {loading ? (
-            <div className="text-sm text-gray-500">Chargement…</div>
-          ) : src ? (
-            <img src={src} alt="Photo express" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
-          ) : (
-            <p className="text-gray-400 text-sm">Impossible de charger la photo.</p>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div>
+      <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1.5">Document de mission</p>
+      <div className="rounded-lg overflow-hidden border border-blue-200 bg-blue-50 cursor-pointer"
+        onClick={() => window.open(src, '_blank')}>
+        {mime === 'application/pdf' ? (
+          <div className="flex items-center gap-3 px-4 py-3">
+            <svg className="w-8 h-8 text-red-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+            </svg>
+            <div>
+              <p className="text-xs font-medium text-blue-800">Document de mission</p>
+              <p className="text-xs text-blue-500">Cliquer pour ouvrir le PDF</p>
+            </div>
+          </div>
+        ) : (
+          <img src={src} alt="Document de mission" className="w-full max-h-48 object-contain" />
+        )}
+      </div>
+    </div>
   );
 }
 
-// ── Inspection modal ───────────────────────────────────────────────────────────
-
-function InspectionModal({ inspection, onClose, onSubmitted }: {
-  inspection: PendingInspection;
+function PhotoLightbox({ deliveryId, initialNotes, onClose, onChanged }: {
+  deliveryId: string;
+  initialNotes: string | null;
   onClose: () => void;
-  onSubmitted: () => void;
+  onChanged: () => void;
 }) {
-  const emptySelections = Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [key, null])) as Record<CheckKey, CheckStatus | null>;
-  const emptyComments   = Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [key, ''])) as Record<CheckKey, string>;
+  const [uploading, setUploading] = useState(false);
+  const [notes, setNotes] = useState(initialNotes ?? '');
+  const [savingNotes, setSavingNotes] = useState(false);
+  const { success, error, toasts, removeToast } = useToast();
 
-  const [selections,     setSelections]     = useState<Record<CheckKey, CheckStatus | null>>(emptySelections);
-  const [itemComments,   setItemComments]   = useState<Record<CheckKey, string>>(emptyComments);
-  const [generalComment, setGeneralComment] = useState('');
-  const [photos,         setPhotos]         = useState<File[]>([]);
-  const [photoUrls,      setPhotoUrls]      = useState<string[]>([]);
-  const [submitting,     setSubmitting]     = useState(false);
-  const [errorMsg,       setErrorMsg]       = useState('');
-  const [photoRetryId,   setPhotoRetryId]   = useState<string | null>(null);
-
-  const allSelected = CHECKLIST_ITEMS.every(({ key }) => selections[key] !== null);
-
-  const addPhotos = (files: FileList | null) => {
-    if (!files) return;
-    const arr = Array.from(files).slice(0, 5 - photos.length);
-    setPhotos((prev) => [...prev, ...arr]);
-    setPhotoUrls((prev) => [...prev, ...arr.map((f) => URL.createObjectURL(f))]);
-  };
-
-  const removePhoto = (i: number) => {
-    URL.revokeObjectURL(photoUrls[i]);
-    setPhotos((prev) => prev.filter((_, j) => j !== i));
-    setPhotoUrls((prev) => prev.filter((_, j) => j !== i));
-  };
-
-  const uploadPhotosFor = async (inspectionId: string) => {
-    const fd = new FormData();
-    photos.forEach((p) => fd.append('photos', p));
-    // Delete Content-Type so the browser sets multipart/form-data with the correct boundary.
-    // The api instance has a default 'application/json' header that would break Multer parsing.
-    await api.post(`/inspections/${inspectionId}/photos`, fd, {
-      headers: { 'Content-Type': undefined },
-    });
-  };
-
-  const handleSubmit = async () => {
-    if (!allSelected) return;
-    setSubmitting(true);
-    setErrorMsg('');
-    setPhotoRetryId(null);
-
-    // Step 1: submit checklist as JSON
-    try {
-      const items = CHECKLIST_ITEMS.map(({ key }) => ({
-        item: key,
-        status: selections[key]!,
-        comment: itemComments[key] || undefined,
-      }));
-      await api.post(`/inspections/${inspection.id}/submit`, {
-        items,
-        generalComment: generalComment || undefined,
-      });
-    } catch (err: any) {
-      setErrorMsg(err?.response?.data?.message || 'Erreur lors de la soumission.');
-      setSubmitting(false);
-      return;
-    }
-
-    // Step 2: upload photos (separate multipart request — axios sets boundary automatically)
-    if (photos.length > 0) {
-      try {
-        await uploadPhotosFor(inspection.id);
-      } catch {
-        setPhotoRetryId(inspection.id);
-        setErrorMsg(
-          "Contrôle soumis mais erreur lors de l'envoi des photos.",
-        );
-        setSubmitting(false);
-        onSubmitted();
-        return;
-      }
-    }
-
-    setSubmitting(false);
-    onSubmitted();
-    onClose();
-  };
-
-  const retryPhotos = async () => {
-    if (!photoRetryId) return;
-    setSubmitting(true);
-    setErrorMsg('');
-    try {
-      await uploadPhotosFor(photoRetryId);
-      setPhotoRetryId(null);
-      onClose();
-    } catch {
-      setErrorMsg("Échec de l'envoi des photos. Vérifiez votre connexion et réessayez.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const dateStr = new Date(inspection.scheduledDate).toLocaleDateString('fr-FR', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+  const { data: liveDelivery, isLoading: deliveryLoading, refetch } = useQuery({
+    queryKey: ['express-detail', deliveryId],
+    queryFn: () => api.get<{ photo: string | null; confirmationPhotos: ConfirmationPhoto[] }>(`/express/${deliveryId}`).then(r => r.data),
   });
+  const photos: ConfirmationPhoto[] = liveDelivery?.confirmationPhotos ?? [];
+  const hasAdminPhoto = !!(liveDelivery?.photo?.startsWith('https://'));
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append('file', file);
+        await api.post(`/express/${deliveryId}/confirmation-photos`, form, {
+          headers: { 'Content-Type': undefined as unknown as string },
+        });
+      }
+      await refetch();
+      onChanged();
+      success(files.length > 1 ? `${files.length} photos enregistrées` : 'Photo enregistrée');
+    } catch {
+      error('Erreur lors de l\'envoi');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (photoId: string) => {
+    try {
+      await api.delete(`/express/${deliveryId}/confirmation-photos/${photoId}`);
+      await refetch();
+      onChanged();
+      success('Photo supprimée');
+    } catch {
+      error('Erreur');
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    setSavingNotes(true);
+    try {
+      await api.patch(`/express/${deliveryId}`, { notes: notes || null });
+      onChanged();
+      success('Notes sauvegardées');
+    } catch {
+      error('Erreur');
+    } finally {
+      setSavingNotes(false);
+    }
+  };
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ClipboardCheck size={18} className="text-blue-600" />
-            Contrôle — {inspection.truck.immatriculation}
-          </DialogTitle>
-          <p className="text-sm text-gray-500">{dateStr}</p>
-        </DialogHeader>
+    <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Camera size={16} /> Photos de mission
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
 
-        <div className="space-y-4 py-2">
-          {/* Checklist */}
-          <div className="space-y-2">
-            {CHECKLIST_ITEMS.map(({ key, label }) => {
-              const sel = selections[key];
-              return (
-                <div key={key} className="rounded-lg border overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
-                    <span className="text-sm font-medium">{label}</span>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelections((p) => ({ ...p, [key]: 'OK' }))}
-                        className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium border transition-colors ${
-                          sel === 'OK'
-                            ? 'bg-green-100 text-green-700 border-green-300'
-                            : 'bg-white text-gray-500 border-gray-200 hover:border-green-300'
-                        }`}
-                      >
-                        <CheckCircle2 size={15} /> OK
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelections((p) => ({ ...p, [key]: 'PROBLEME' }))}
-                        className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium border transition-colors ${
-                          sel === 'PROBLEME'
-                            ? 'bg-red-100 text-red-700 border-red-300'
-                            : 'bg-white text-gray-500 border-gray-200 hover:border-red-300'
-                        }`}
-                      >
-                        <AlertTriangle size={15} /> Problème
-                      </button>
-                    </div>
-                  </div>
-                  {sel === 'PROBLEME' && (
-                    <div className="px-4 py-2 bg-red-50 border-t border-red-100">
-                      <input
-                        type="text"
-                        placeholder="Décrire le problème…"
-                        value={itemComments[key]}
-                        onChange={(e) => setItemComments((p) => ({ ...p, [key]: e.target.value }))}
-                        className="w-full text-sm bg-white border border-red-200 rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+            {/* Admin mission document — header inside AdminDocThumb, hides on 404 */}
+            {hasAdminPhoto && <AdminDocThumb deliveryId={deliveryId} />}
 
-          {/* General comment */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Commentaire général / problème moteur
-            </label>
-            <textarea
-              rows={3}
-              placeholder="Observations générales, anomalies moteur…"
-              value={generalComment}
-              onChange={(e) => setGeneralComment(e.target.value)}
-              className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Photos */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-              <Camera size={14} /> Photos ({photos.length}/5)
-            </label>
-            {photoUrls.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {photoUrls.map((url, i) => (
-                  <div key={i} className="relative">
-                    <img src={url} alt={`photo-${i}`} className="h-20 w-20 object-cover rounded-lg border" />
-                    <button
-                      type="button"
-                      onClick={() => removePhoto(i)}
-                      className="absolute -top-1.5 -right-1.5 bg-white border border-gray-300 rounded-full p-0.5 shadow-sm hover:bg-red-50"
-                    >
-                      <X size={12} className="text-gray-600" />
-                    </button>
-                  </div>
+            {/* Employee confirmation photos */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Mes photos de mission</p>
+            {deliveryLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 size={20} className="animate-spin text-gray-300" />
+              </div>
+            ) : photos.length > 0 ? (
+              <div className="grid grid-cols-3 gap-2">
+                {photos.map(p => (
+                  <EmployeeConfirmThumb
+                    key={p.id}
+                    deliveryId={deliveryId}
+                    photo={p}
+                    onDelete={() => handleDelete(p.id)}
+                  />
                 ))}
               </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-6 text-gray-400">
+                <Camera size={28} className="text-gray-300" />
+                <p className="text-sm">Aucune photo ajoutée</p>
+              </div>
             )}
-            {photos.length < 5 && (
-              <label className="inline-flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-600 cursor-pointer hover:border-blue-400 hover:text-blue-600 transition-colors">
-                <Camera size={15} />
-                {photos.length === 0 ? 'Ajouter des photos' : 'Ajouter une photo'}
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => addPhotos(e.target.files)}
-                />
-              </label>
-            )}
-          </div>
-
-          {errorMsg && (
-            <div className={`text-sm rounded px-3 py-2 border ${photoRetryId ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : 'bg-red-50 border-red-200 text-red-600'}`}>
-              <p>{errorMsg}</p>
-              {photoRetryId && (
-                <button
-                  type="button"
-                  onClick={retryPhotos}
-                  disabled={submitting}
-                  className="mt-1.5 text-xs font-semibold underline hover:no-underline disabled:opacity-50"
-                >
-                  {submitting ? 'Envoi en cours…' : 'Réessayer les photos'}
-                </button>
-              )}
             </div>
-          )}
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={submitting}>
-            {photoRetryId ? 'Fermer' : 'Annuler'}
-          </Button>
-          {!photoRetryId && (
-            <Button
-              onClick={handleSubmit}
-              disabled={!allSelected || submitting}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {submitting
-                ? <><Loader2 size={14} className="mr-1 animate-spin" />Envoi…</>
-                : 'Soumettre le contrôle'}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {/* Add photos */}
+            <div>
+              <input type="file" accept=".jpg,.jpeg,.png,.pdf" id="lb-confirm-upload" className="hidden" multiple
+                onChange={e => { handleUpload(e.target.files); e.target.value = ''; }} />
+              <label htmlFor="lb-confirm-upload"
+                className={`flex items-center justify-center gap-2 w-full border border-dashed border-gray-300 rounded-lg py-2 text-sm cursor-pointer hover:bg-gray-50 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                {uploading
+                  ? <><Loader2 size={14} className="animate-spin" /> Envoi…</>
+                  : <><Upload size={14} /> Ajouter des photos</>}
+              </label>
+            </div>
+
+            {/* Notes */}
+            <div className="border-t pt-3 space-y-2">
+              <Label className="text-sm font-medium text-gray-700">Notes</Label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder="Observations…" rows={2}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+              <Button size="sm" variant="outline" className="w-full" onClick={handleSaveNotes}
+                disabled={savingNotes || notes === (initialNotes ?? '')}>
+                {savingNotes ? <><Loader2 size={13} className="mr-1 animate-spin" /> Sauvegarde…</> : 'Sauvegarder les notes'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -673,8 +645,7 @@ export default function MyAssignments() {
   const queryClient = useQueryClient();
   const [confirmingTour, setConfirmingTour]       = useState<TourItem | null>(null);
   const [confirmingExpress, setConfirmingExpress] = useState<ExpressItem | null>(null);
-  const [photoDeliveryId, setPhotoDeliveryId]     = useState<string | null>(null);
-  const [inspectingId, setInspectingId]           = useState<PendingInspection | null>(null);
+  const [photoDelivery, setPhotoDelivery]         = useState<{ id: string; notes: string | null } | null>(null);
 
   const { data, isLoading, isError } = useQuery<AssignmentsResponse>({
     queryKey: ['my-assignments'],
@@ -686,16 +657,6 @@ export default function MyAssignments() {
     queryFn: () => api.get<ExpressItem[]>('/employees/me/express').then(r => r.data),
   });
 
-  const { data: pendingInspections = [], isLoading: inspectionsLoading } = useQuery<PendingInspection[]>({
-    queryKey: ['my-inspections'],
-    queryFn: () => api.get<PendingInspection[]>('/employees/me/inspections').then(r => r.data),
-  });
-
-  useEffect(() => {
-    const all = [...(data?.upcoming ?? []), ...(data?.history ?? [])];
-    all.forEach(a => api.post(`/tours/${a.id}/assignment/seen`).catch(() => {}));
-  }, [data]);
-
   const upcoming = data?.upcoming ?? [];
   const history  = data?.history  ?? [];
 
@@ -705,41 +666,6 @@ export default function MyAssignments() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">Mes Tournées</h1>
-
-      {/* ── Contrôles en attente (alert banner on mobile) ──────────────────── */}
-      {(inspectionsLoading || pendingInspections.length > 0) && (
-        <section className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-          <h2 className="text-sm font-semibold text-orange-700 mb-3 flex items-center gap-2">
-            <ClipboardCheck size={15} className="text-orange-500" /> Contrôles en attente ({pendingInspections.length})
-          </h2>
-          {inspectionsLoading ? (
-            <div className="space-y-3">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
-          ) : (
-            <div className="space-y-3">
-              {pendingInspections.map((insp) => (
-                <div key={insp.id} className="flex items-center justify-between gap-3 bg-white border border-orange-100 rounded-lg p-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <Truck size={13} className="text-orange-500 flex-shrink-0" />
-                      <span className="font-bold font-mono text-sm truncate">{insp.truck.immatriculation}</span>
-                    </div>
-                    <p className="text-xs text-gray-500 leading-snug">
-                      {new Date(insp.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
-                    </p>
-                  </div>
-                    <Button
-                      size="sm"
-                      className="bg-orange-600 hover:bg-orange-700 text-white shrink-0 min-h-[44px] px-3 text-xs"
-                      onClick={() => setInspectingId(insp)}
-                    >
-                      <ClipboardCheck size={13} className="mr-1" /> Contrôle
-                    </Button>
-                  </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       {isLoading ? (
         <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
@@ -786,7 +712,7 @@ export default function MyAssignments() {
                 key={e.id}
                 item={e}
                 onConfirm={setConfirmingExpress}
-                onViewPhoto={setPhotoDeliveryId}
+                onViewPhoto={(id, notes) => setPhotoDelivery({ id, notes })}
               />
             ))}
             {confirmedExpress.map(e => (
@@ -794,7 +720,7 @@ export default function MyAssignments() {
                 key={e.id}
                 item={e}
                 onConfirm={setConfirmingExpress}
-                onViewPhoto={setPhotoDeliveryId}
+                onViewPhoto={(id, notes) => setPhotoDelivery({ id, notes })}
               />
             ))}
           </div>
@@ -820,16 +746,12 @@ export default function MyAssignments() {
       )}
 
       {/* Photo lightbox */}
-      {photoDeliveryId && (
-        <PhotoLightbox deliveryId={photoDeliveryId} onClose={() => setPhotoDeliveryId(null)} />
-      )}
-
-      {/* Inspection modal */}
-      {inspectingId && (
-        <InspectionModal
-          inspection={inspectingId}
-          onClose={() => setInspectingId(null)}
-          onSubmitted={() => queryClient.invalidateQueries({ queryKey: ['my-inspections'] })}
+      {photoDelivery && (
+        <PhotoLightbox
+          deliveryId={photoDelivery.id}
+          initialNotes={photoDelivery.notes}
+          onClose={() => setPhotoDelivery(null)}
+          onChanged={() => queryClient.invalidateQueries({ queryKey: ['my-express'] })}
         />
       )}
     </div>

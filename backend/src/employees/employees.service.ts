@@ -1,12 +1,13 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { unlinkSync } from 'fs';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { CreateEmployeeAccountDto } from './dto/create-account.dto';
@@ -23,7 +24,12 @@ const WITH_USER = {
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EmployeesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async create(dto: CreateEmployeeDto) {
     const name = `${dto.firstName} ${dto.lastName}`.trim();
@@ -210,13 +216,22 @@ export class EmployeesService {
     uploadedById?: string,
   ) {
     await this.findOne(employeeId);
+
+    const fileUrl = await this.cloudinary.uploadBuffer(
+      file.buffer,
+      file.mimetype,
+      `tournee-pro/employees/${employeeId}`,
+      file.originalname,
+    );
+    this.logger.log(`Employee doc uploaded to Cloudinary: ${fileUrl}`);
+
     return this.prisma.employeeDocument.create({
       data: {
         employeeId,
-        fileName: file.filename,
+        fileName: file.originalname,
         originalName: file.originalname,
         fileType: dto.fileType,
-        filePath: file.path,
+        filePath: fileUrl,
         mimeType: file.mimetype,
         uploadedById: uploadedById ?? null,
       },
@@ -234,10 +249,8 @@ export class EmployeesService {
 
   async deleteDocument(employeeId: string, docId: string) {
     const doc = await this.findDocument(employeeId, docId);
-    try {
-      unlinkSync(doc.filePath);
-    } catch {
-      /* file already gone */
+    if (doc.filePath?.startsWith('https://')) {
+      await this.cloudinary.deleteByUrl(doc.filePath);
     }
     return this.prisma.employeeDocument.delete({ where: { id: docId } });
   }
@@ -361,6 +374,59 @@ export class EmployeesService {
       ),
     );
     return this.getPayRates(employeeId);
+  }
+
+  async getEmployeePlatformPayRates(employeeId: string) {
+    await this.findOne(employeeId);
+    const SYSTEM_CODES = ['GARONOR', 'F166'];
+    const [custom, platforms] = await Promise.all([
+      this.prisma.employeePlatformPayRate.findMany({ where: { employeeId } }),
+      this.prisma.platform.findMany({
+        where: { code: { notIn: SYSTEM_CODES } },
+        orderBy: { name: 'asc' },
+        include: { payRate: true },
+      }),
+    ]);
+    const customMap = new Map(custom.map((r) => [r.platformId, r]));
+    return platforms.map((p) => {
+      const override = customMap.get(p.id);
+      const global = p.payRate;
+      return {
+        platformId: p.id,
+        platformName: p.name,
+        chauffeurRate: override?.chauffeurRate ?? global?.chauffeurRate ?? 0,
+        aideRate: override?.aideRate ?? global?.aideRate ?? null,
+        isOverride: !!override,
+      };
+    });
+  }
+
+  async upsertEmployeePlatformPayRates(
+    employeeId: string,
+    rates: { platformId: string; chauffeurRate: number; aideRate?: number | null }[],
+    userId: string,
+  ) {
+    await this.findOne(employeeId);
+    await Promise.all(
+      rates.map((r) =>
+        this.prisma.employeePlatformPayRate.upsert({
+          where: { employeeId_platformId: { employeeId, platformId: r.platformId } },
+          update: {
+            chauffeurRate: r.chauffeurRate,
+            aideRate: r.aideRate ?? null,
+            updatedById: userId,
+          },
+          create: {
+            employeeId,
+            platformId: r.platformId,
+            chauffeurRate: r.chauffeurRate,
+            aideRate: r.aideRate ?? null,
+            updatedById: userId,
+          },
+        }),
+      ),
+    );
+    return this.getEmployeePlatformPayRates(employeeId);
   }
 
   async getMyAssignments(userId: string) {

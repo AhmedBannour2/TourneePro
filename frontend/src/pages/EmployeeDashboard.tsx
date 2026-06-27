@@ -1,20 +1,222 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import {
-  Truck,
-  Users,
-  Clock,
-  MapPin,
-  Calendar,
-  ChevronRight,
-  Package,
-  Phone,
+  Truck, Users, Clock, MapPin, Calendar, ChevronRight, Package, Phone,
+  ClipboardCheck, CheckCircle2, AlertTriangle, Camera, X, Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+
+interface PendingInspection {
+  id: string;
+  scheduledDate: string;
+  truck: { id: string; immatriculation: string };
+  assignedTo: { id: string; name: string };
+}
+
+const CHECKLIST_ITEMS = [
+  { key: 'HUILE',         label: "Niveau d'huile" },
+  { key: 'RADIATEUR',     label: 'Eau du radiateur' },
+  { key: 'CAISSE_OUTILS', label: 'Caisse à outils' },
+  { key: 'CHARIOT',       label: 'Chariot' },
+  { key: 'ROULETTES',     label: 'Roulettes' },
+  { key: 'COUVERCLE',     label: 'Couvercle de produit' },
+] as const;
+
+type CheckKey = typeof CHECKLIST_ITEMS[number]['key'];
+type CheckStatus = 'OK' | 'PROBLEME';
+
+function InspectionModal({ inspection, onClose, onSubmitted }: {
+  inspection: PendingInspection;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const emptySelections = Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [key, null])) as Record<CheckKey, CheckStatus | null>;
+  const emptyComments   = Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [key, ''])) as Record<CheckKey, string>;
+
+  const [selections,     setSelections]     = useState<Record<CheckKey, CheckStatus | null>>(emptySelections);
+  const [itemComments,   setItemComments]   = useState<Record<CheckKey, string>>(emptyComments);
+  const [generalComment, setGeneralComment] = useState('');
+  const [photos,         setPhotos]         = useState<File[]>([]);
+  const [photoUrls,      setPhotoUrls]      = useState<string[]>([]);
+  const [submitting,     setSubmitting]     = useState(false);
+  const [errorMsg,       setErrorMsg]       = useState('');
+  const [photoRetryId,   setPhotoRetryId]   = useState<string | null>(null);
+
+  const allSelected = CHECKLIST_ITEMS.every(({ key }) => selections[key] !== null);
+
+  const addPhotos = (files: FileList | null) => {
+    if (!files) return;
+    const arr = Array.from(files).slice(0, 5 - photos.length);
+    setPhotos((prev) => [...prev, ...arr]);
+    setPhotoUrls((prev) => [...prev, ...arr.map((f) => URL.createObjectURL(f))]);
+  };
+
+  const removePhoto = (i: number) => {
+    URL.revokeObjectURL(photoUrls[i]);
+    setPhotos((prev) => prev.filter((_, j) => j !== i));
+    setPhotoUrls((prev) => prev.filter((_, j) => j !== i));
+  };
+
+  const uploadPhotosFor = async (inspectionId: string) => {
+    const fd = new FormData();
+    photos.forEach((p) => fd.append('photos', p));
+    await api.post(`/inspections/${inspectionId}/photos`, fd);
+  };
+
+  const handleSubmit = async () => {
+    if (!allSelected) return;
+    setSubmitting(true);
+    setErrorMsg('');
+    setPhotoRetryId(null);
+    try {
+      const items = CHECKLIST_ITEMS.map(({ key }) => ({
+        item: key,
+        status: selections[key]!,
+        comment: itemComments[key] || undefined,
+      }));
+      await api.post(`/inspections/${inspection.id}/submit`, { items, generalComment: generalComment || undefined });
+    } catch (err: any) {
+      setErrorMsg(err?.response?.data?.message || 'Erreur lors de la soumission.');
+      setSubmitting(false);
+      return;
+    }
+    if (photos.length > 0) {
+      try {
+        await uploadPhotosFor(inspection.id);
+      } catch {
+        setPhotoRetryId(inspection.id);
+        setErrorMsg("Contrôle soumis mais erreur lors de l'envoi des photos.");
+        setSubmitting(false);
+        onSubmitted();
+        return;
+      }
+    }
+    setSubmitting(false);
+    onSubmitted();
+    onClose();
+  };
+
+  const retryPhotos = async () => {
+    if (!photoRetryId) return;
+    setSubmitting(true);
+    setErrorMsg('');
+    try {
+      await uploadPhotosFor(photoRetryId);
+      setPhotoRetryId(null);
+      onClose();
+    } catch {
+      setErrorMsg("Échec de l'envoi des photos. Vérifiez votre connexion et réessayez.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const dateStr = new Date(inspection.scheduledDate).toLocaleDateString('fr-FR', {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardCheck size={18} className="text-blue-600" />
+            Contrôle — {inspection.truck.immatriculation}
+          </DialogTitle>
+          <p className="text-sm text-gray-500">{dateStr}</p>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            {CHECKLIST_ITEMS.map(({ key, label }) => {
+              const sel = selections[key];
+              return (
+                <div key={key} className="rounded-lg border overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
+                    <span className="text-sm font-medium">{label}</span>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setSelections((p) => ({ ...p, [key]: 'OK' }))}
+                        className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium border transition-colors ${sel === 'OK' ? 'bg-green-100 text-green-700 border-green-300' : 'bg-white text-gray-500 border-gray-200 hover:border-green-300'}`}>
+                        <CheckCircle2 size={15} /> OK
+                      </button>
+                      <button type="button" onClick={() => setSelections((p) => ({ ...p, [key]: 'PROBLEME' }))}
+                        className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-lg text-sm font-medium border transition-colors ${sel === 'PROBLEME' ? 'bg-red-100 text-red-700 border-red-300' : 'bg-white text-gray-500 border-gray-200 hover:border-red-300'}`}>
+                        <AlertTriangle size={15} /> Problème
+                      </button>
+                    </div>
+                  </div>
+                  {sel === 'PROBLEME' && (
+                    <div className="px-4 py-2 bg-red-50 border-t border-red-100">
+                      <input type="text" placeholder="Décrire le problème…" value={itemComments[key]}
+                        onChange={(e) => setItemComments((p) => ({ ...p, [key]: e.target.value }))}
+                        className="w-full text-sm bg-white border border-red-200 rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Commentaire général / problème moteur</label>
+            <textarea rows={3} placeholder="Observations générales, anomalies moteur…" value={generalComment}
+              onChange={(e) => setGeneralComment(e.target.value)}
+              className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <Camera size={14} /> Photos ({photos.length}/5)
+            </label>
+            {photoUrls.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {photoUrls.map((url, i) => (
+                  <div key={i} className="relative">
+                    <img src={url} alt={`photo-${i}`} className="h-20 w-20 object-cover rounded-lg border" />
+                    <button type="button" onClick={() => removePhoto(i)}
+                      className="absolute -top-1.5 -right-1.5 bg-white border border-gray-300 rounded-full p-0.5 shadow-sm hover:bg-red-50">
+                      <X size={12} className="text-gray-600" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {photos.length < 5 && (
+              <label className="inline-flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-600 cursor-pointer hover:border-blue-400 hover:text-blue-600 transition-colors">
+                <Camera size={15} />
+                {photos.length === 0 ? 'Ajouter des photos' : 'Ajouter une photo'}
+                <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => addPhotos(e.target.files)} />
+              </label>
+            )}
+          </div>
+          {errorMsg && (
+            <div className={`text-sm rounded px-3 py-2 border ${photoRetryId ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : 'bg-red-50 border-red-200 text-red-600'}`}>
+              <p>{errorMsg}</p>
+              {photoRetryId && (
+                <button type="button" onClick={retryPhotos} disabled={submitting}
+                  className="mt-1.5 text-xs font-semibold underline hover:no-underline disabled:opacity-50">
+                  {submitting ? 'Envoi en cours…' : 'Réessayer les photos'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>{photoRetryId ? 'Fermer' : 'Annuler'}</Button>
+          {!photoRetryId && (
+            <Button onClick={handleSubmit} disabled={!allSelected || submitting} className="bg-blue-600 hover:bg-blue-700 text-white">
+              {submitting ? <><Loader2 size={14} className="mr-1 animate-spin" />Envoi…</> : 'Soumettre le contrôle'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 interface AssignmentItem {
   id: string;
@@ -205,6 +407,8 @@ function UpcomingCard({ item }: { item: AssignmentItem }) {
 export default function EmployeeDashboard() {
   usePageTitle('Mon espace');
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [inspectingId, setInspectingId] = useState<PendingInspection | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['employee-dashboard'],
@@ -213,6 +417,17 @@ export default function EmployeeDashboard() {
       return data;
     },
   });
+
+  const { data: pendingInspections = [], isLoading: inspectionsLoading } = useQuery<PendingInspection[]>({
+    queryKey: ['my-inspections'],
+    queryFn: () => api.get<PendingInspection[]>('/employees/me/inspections').then(r => r.data),
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    const all = [...data.upcoming, ...data.history];
+    all.forEach(a => api.post(`/tours/${a.id}/assignment/seen`).catch(() => {}));
+  }, [data]);
 
   const today = data?.upcoming.find((a) => isToday(a.date)) ?? null;
   const tomorrow = data?.upcoming.find((a) => isTomorrow(a.date)) ?? null;
@@ -262,6 +477,41 @@ export default function EmployeeDashboard() {
           <Package className="w-10 h-10 mx-auto mb-2 text-gray-300" />
           <p className="text-gray-500 font-medium">Pas de tournée assignée aujourd'hui</p>
         </Card>
+      )}
+
+      {/* Pending inspections */}
+      {(inspectionsLoading || pendingInspections.length > 0) && (
+        <section className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-orange-700 mb-3 flex items-center gap-2">
+            <ClipboardCheck size={15} className="text-orange-500" /> Contrôles en attente ({pendingInspections.length})
+          </h2>
+          {inspectionsLoading ? (
+            <div className="space-y-3">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
+          ) : (
+            <div className="space-y-3">
+              {pendingInspections.map((insp) => (
+                <div key={insp.id} className="flex items-center justify-between gap-3 bg-white border border-orange-100 rounded-lg p-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <Truck size={13} className="text-orange-500 flex-shrink-0" />
+                      <span className="font-bold font-mono text-sm truncate">{insp.truck.immatriculation}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-snug">
+                      {new Date(insp.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-orange-600 hover:bg-orange-700 text-white shrink-0 min-h-[44px] px-3 text-xs"
+                    onClick={() => setInspectingId(insp)}
+                  >
+                    <ClipboardCheck size={13} className="mr-1" /> Contrôle
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
       {/* Tomorrow + later upcoming */}
@@ -375,6 +625,14 @@ export default function EmployeeDashboard() {
           <Package className="w-12 h-12 mx-auto mb-3 opacity-20" />
           <p className="text-gray-500">Aucune tournée dans votre historique.</p>
         </Card>
+      )}
+
+      {inspectingId && (
+        <InspectionModal
+          inspection={inspectingId}
+          onClose={() => setInspectingId(null)}
+          onSubmitted={() => queryClient.invalidateQueries({ queryKey: ['my-inspections'] })}
+        />
       )}
     </div>
   );

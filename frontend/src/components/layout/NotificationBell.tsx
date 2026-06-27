@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,6 +42,7 @@ function timeAgo(iso: string): string {
 
 export default function NotificationBell() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -75,7 +77,7 @@ export default function NotificationBell() {
 
   const handleClick = (notif: Notification) => {
     if (!notif.read) markReadMutation.mutate(notif.id);
-    if (notif.link) window.location.href = notif.link;
+    if (notif.link) navigate(notif.link);
     setOpen(false);
   };
 

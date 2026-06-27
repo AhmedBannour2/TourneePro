@@ -6,10 +6,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { mkdirSync } from 'fs';
-import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notification/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateTruckDto } from './dto/create-truck.dto';
 import { UpdateTruckDto } from './dto/update-truck.dto';
 import { CreateRepairLogDto } from './dto/create-repair-log.dto';
@@ -47,6 +47,8 @@ export class TrucksService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -339,8 +341,34 @@ export class TrucksService {
       });
     });
 
-    // Send problem notification if any item has PROBLEME status
     const problemItems = dto.items.filter((i) => i.status === 'PROBLEME');
+    const immat = updated.truck.immatriculation;
+    const employeeName = updated.assignedTo.name;
+
+    // ── In-app notifications ─────────────────────────────────────────────────
+    if (problemItems.length > 0) {
+      this.notifications
+        .createForRole(['ADMIN', 'DISPATCHER'], {
+          type: 'INSPECTION_PROBLEM',
+          title: `⚠️ Anomalie contrôle — ${immat}`,
+          message: `${employeeName} a signalé ${problemItems.length} anomalie(s) lors du contrôle de ${immat}.`,
+          link: `/trucks?truck=${updated.truck.id}&tab=inspections`,
+          metadata: { inspectionId, truckId: updated.truck.id },
+        })
+        .catch(() => {});
+    } else {
+      this.notifications
+        .createForRole(['ADMIN', 'DISPATCHER'], {
+          type: 'INSPECTION_SUBMITTED',
+          title: `✅ Contrôle OK — ${immat}`,
+          message: `${employeeName} a soumis le contrôle de ${immat} sans anomalie.`,
+          link: `/trucks?truck=${updated.truck.id}&tab=inspections`,
+          metadata: { inspectionId, truckId: updated.truck.id },
+        })
+        .catch(() => {});
+    }
+
+    // ── Email on problem only ────────────────────────────────────────────────
     if (problemItems.length > 0) {
       const adminEmail =
         this.config.get<string>('MAIL_ADMIN') ??
@@ -349,18 +377,13 @@ export class TrucksService {
       this.mail
         .sendInspectionProblemEmail({
           to: adminEmail,
-          truckImmatriculation: updated.truck.immatriculation,
-          employeeName: updated.assignedTo.name,
-          problemItems: problemItems.map((i) => ({
-            item: i.item,
-            comment: i.comment ?? null,
-          })),
+          truckImmatriculation: immat,
+          employeeName,
+          problemItems: problemItems.map((i) => ({ item: i.item, comment: i.comment ?? null })),
           generalComment: dto.generalComment ?? null,
           scheduledDate: updated.scheduledDate,
         })
-        .catch(() => {
-          /* silent */
-        });
+        .catch(() => {});
     }
 
     return updated;
@@ -369,7 +392,6 @@ export class TrucksService {
   async uploadInspectionPhotos(inspectionId: string, files: Express.Multer.File[], userId: string) {
     const employeeId = await this.resolveEmployeeId(userId);
 
-    // Fetch current photos so we can append rather than use Prisma push (more reliable)
     const inspection = await this.prisma.truckInspection.findUnique({
       where: { id: inspectionId },
       select: { assignedToId: true, photos: true },
@@ -380,31 +402,33 @@ export class TrucksService {
     }
 
     if (files.length === 0) {
-      this.logger.warn(
-        `uploadInspectionPhotos id=${inspectionId}: received 0 files — Content-Type or field name mismatch? Existing photos: ${inspection.photos.length}`,
-      );
       throw new BadRequestException(
         'Aucun fichier reçu. Vérifiez que les photos sont bien sélectionnées (JPEG ou PNG uniquement).',
       );
     }
 
-    const newPaths = files.map((f) => `uploads/inspections/${inspectionId}/${f.filename}`);
-    this.logger.log(
-      `uploadInspectionPhotos id=${inspectionId} files=${files.length} existingPhotos=${inspection.photos.length} newPaths=${JSON.stringify(newPaths)}`,
+    const uploadedUrls = await Promise.all(
+      files.map((f) =>
+        this.cloudinary.uploadBuffer(
+          f.buffer,
+          f.mimetype,
+          `tournee-pro/inspections/${inspectionId}`,
+          f.originalname,
+        ),
+      ),
     );
 
-    const allPhotos = [...inspection.photos, ...newPaths];
+    this.logger.log(
+      `uploadInspectionPhotos id=${inspectionId} uploaded ${uploadedUrls.length} files to Cloudinary`,
+    );
 
-    const updated = await this.prisma.truckInspection.update({
+    const allPhotos = [...inspection.photos, ...uploadedUrls];
+
+    return this.prisma.truckInspection.update({
       where: { id: inspectionId },
       data: { photos: allPhotos },
       include: INSPECTION_INCLUDE,
     });
-
-    this.logger.log(
-      `uploadInspectionPhotos saved — photos in DB now: ${JSON.stringify(updated.photos)}`,
-    );
-    return updated;
   }
 
   async acknowledgeInspection(inspectionId: string, userId: string) {

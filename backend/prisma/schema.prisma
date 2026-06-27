@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 // ── Enums ────────────────────────────────────────────────────────────────────
@@ -34,11 +35,13 @@ enum WorkedDayStatus {
 enum ExpressMissionType {
   STANDARD
   GV
+  AUTRE
 }
 
 enum ExpressDeliveryType {
   STANDARD
   GV
+  AUTRE
 }
 
 enum ExpressDeliveryStatus {
@@ -132,20 +135,22 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
 
   auditEvents              AuditEvent[]
-  employee                 Employee?
-  repairLogs               TruckRepairLog[]
-  uploadedDocuments        EmployeeDocument[]
-  updatedPayRates          EmployeePayRate[]
-  overriddenWorkedDays     WorkedDay[]        @relation("WorkedDayOverride")
-  addedExpressMissions     ExpressMission[]
-  createdExpressDeliveries ExpressDelivery[]  @relation("ExpressDeliveryCreator")
-  updatedGlobalPayRates    GlobalPayRate[]
-  requestedInspections     TruckInspection[]  @relation("InspectionRequester")
-  acknowledgedInspections  TruckInspection[]  @relation("InspectionAcknowledger")
-  uploadedTruckDocuments   TruckDocument[]
-  notifications            Notification[]
-  deviceTokens             DeviceToken[]
-  dayValidations           DayValidation[]
+  employee                        Employee?
+  repairLogs                      TruckRepairLog[]
+  uploadedDocuments               EmployeeDocument[]
+  updatedPayRates                 EmployeePayRate[]
+  overriddenWorkedDays            WorkedDay[]        @relation("WorkedDayOverride")
+  addedExpressMissions            ExpressMission[]
+  createdExpressDeliveries        ExpressDelivery[]  @relation("ExpressDeliveryCreator")
+  updatedGlobalPayRates           GlobalPayRate[]
+  updatedPlatformPayRates         PlatformPayRate[]
+  updatedEmployeePlatformPayRates EmployeePlatformPayRate[]
+  requestedInspections            TruckInspection[]  @relation("InspectionRequester")
+  acknowledgedInspections         TruckInspection[]  @relation("InspectionAcknowledger")
+  uploadedTruckDocuments          TruckDocument[]
+  notifications                   Notification[]
+  deviceTokens                    DeviceToken[]
+  dayValidations                  DayValidation[]
 
   @@map("users")
 }
@@ -172,6 +177,7 @@ model Employee {
   workedDays             WorkedDay[]
   documents              EmployeeDocument[]
   payRates               EmployeePayRate[]
+  platformPayRates       EmployeePlatformPayRate[]
   tourConfirmations      TourConfirmation[]
   inspections            TruckInspection[]
 
@@ -224,7 +230,9 @@ model Platform {
   code      String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
-  tours Tour[]
+  tours            Tour[]
+  payRate          PlatformPayRate?
+  employeePayRates EmployeePlatformPayRate[]
 
   @@map("platforms")
 }
@@ -328,14 +336,18 @@ model ExpressDelivery {
   type        ExpressDeliveryType
   date        DateTime
   status      ExpressDeliveryStatus @default(PENDING)
-  photo       String?               // file path to uploaded screenshot
+  photo       String?
   notes       String?
+  pay         Float?
+  startTime   String?               @map("start_time")
+  endTime     String?               @map("end_time")
   createdById String                @map("created_by_id")
   createdAt   DateTime              @default(now()) @map("created_at")
   updatedAt   DateTime              @updatedAt @map("updated_at")
 
-  createdBy   User                @relation("ExpressDeliveryCreator", fields: [createdById], references: [id])
-  assignments ExpressAssignment[]
+  createdBy          User                   @relation("ExpressDeliveryCreator", fields: [createdById], references: [id])
+  assignments        ExpressAssignment[]
+  confirmationPhotos ExpressDeliveryPhoto[]
 
   @@index([date])
   @@index([status])
@@ -357,6 +369,18 @@ model ExpressAssignment {
   @@index([expressDeliveryId])
   @@index([employeeId])
   @@map("express_assignments")
+}
+
+model ExpressDeliveryPhoto {
+  id                String          @id @default(uuid())
+  expressDeliveryId String          @map("express_delivery_id")
+  url               String
+  uploadedAt        DateTime        @default(now()) @map("uploaded_at")
+
+  expressDelivery ExpressDelivery @relation(fields: [expressDeliveryId], references: [id], onDelete: Cascade)
+
+  @@index([expressDeliveryId])
+  @@map("express_delivery_photos")
 }
 
 model TourConfirmation {
@@ -407,6 +431,38 @@ model EmployeePayRate {
   @@unique([employeeId, tourType])
   @@index([employeeId])
   @@map("employee_pay_rates")
+}
+
+model PlatformPayRate {
+  id            String   @id @default(uuid())
+  platformId    String   @unique @map("platform_id")
+  chauffeurRate Float    @map("chauffeur_rate")
+  aideRate      Float?   @map("aide_rate")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  updatedById   String?  @map("updated_by_id")
+
+  platform  Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation(fields: [updatedById], references: [id])
+
+  @@map("platform_pay_rates")
+}
+
+model EmployeePlatformPayRate {
+  id            String   @id @default(uuid())
+  employeeId    String   @map("employee_id")
+  platformId    String   @map("platform_id")
+  chauffeurRate Float    @map("chauffeur_rate")
+  aideRate      Float?   @map("aide_rate")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  updatedById   String?  @map("updated_by_id")
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  platform  Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation(fields: [updatedById], references: [id])
+
+  @@unique([employeeId, platformId])
+  @@index([employeeId])
+  @@map("employee_platform_pay_rates")
 }
 
 model WorkedDay {

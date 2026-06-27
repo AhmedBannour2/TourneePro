@@ -74,8 +74,15 @@ cd frontend && npm run dev
 ## Prisma Workflow
 
 After any change to `prisma/schema.prisma`:
-1. `npm run prisma:migrate` — creates and applies the migration
-2. `npm run prisma:generate` — regenerates client types
+1. Stop the backend (`Ctrl+C` in the terminal running `start:dev`)
+2. `npm run prisma:migrate` — creates and applies the migration (requires shadow DB)
+3. `npm run prisma:generate` — regenerates client types (backend must be stopped — DLL lock on Windows)
+4. Restart the backend
+
+**CRITICAL RULES — never break these:**
+- **NEVER use `prisma db push` on a database with real data.** It syncs the schema directly and can drop/recreate enum types and tables, wiping all data with no rollback. It is only acceptable on a completely empty/throwaway database.
+- **NEVER use `prisma migrate dev` while the backend is running on Windows** — the Prisma DLL is locked and `generate` will fail with EPERM.
+- The P3006 shadow DB error is solved permanently by `SHADOW_DATABASE_URL` in `.env` pointing to `tourneepro_shadow` (already created in Docker). Do not work around P3006 with `db push`.
 
 Never edit migration SQL files manually.
 

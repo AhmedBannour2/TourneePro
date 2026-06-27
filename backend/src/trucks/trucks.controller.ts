@@ -13,9 +13,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { mkdirSync, existsSync } from 'fs';
+import { memoryStorage } from 'multer';
 import { Logger } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { TrucksService } from './trucks.service';
@@ -131,16 +129,7 @@ export class InspectionsController {
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(
     FilesInterceptor('photos', 5, {
-      storage: diskStorage({
-        destination: (req, _file, cb) => {
-          const dir = join(process.cwd(), 'uploads', 'inspections', req.params.id);
-          mkdirSync(dir, { recursive: true });
-          cb(null, dir);
-        },
-        filename: (_req, file, cb) => {
-          cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         const allowed = ['image/jpeg', 'image/jpg', 'image/png'];
         if (allowed.includes(file.mimetype)) {

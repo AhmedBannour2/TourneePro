@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { SYSTEM_PAY_DEFAULTS } from '../worked-days/worked-days.service';
 import { GlobalRateItemDto } from './dto/upsert-global-pay-rates.dto';
+import { PlatformRateItemDto } from './dto/upsert-platform-pay-rates.dto';
 import { MailConfigDto } from './dto/mail-config.dto';
 
 export interface MailConfig {
@@ -81,6 +82,51 @@ export class SettingsService {
       include: INCLUDE_UPDATED_BY,
       orderBy: { tourType: 'asc' },
     });
+  }
+
+  // ── Platform pay rates ──────────────────────────────────────────────────────
+
+  // Platforms managed by the Boulanger sync — excluded from custom pay rates
+  private static readonly SYSTEM_PLATFORM_CODES = ['GARONOR', 'F166'];
+
+  async getPlatformPayRates() {
+    const platforms = await this.prisma.platform.findMany({
+      where: { code: { notIn: SettingsService.SYSTEM_PLATFORM_CODES } },
+      orderBy: { name: 'asc' },
+      include: {
+        payRate: { include: INCLUDE_UPDATED_BY },
+      },
+    });
+    return platforms.map((p) => ({
+      platformId: p.id,
+      platformName: p.name,
+      chauffeurRate: p.payRate?.chauffeurRate ?? 0,
+      aideRate: p.payRate?.aideRate ?? null,
+      updatedAt: p.payRate?.updatedAt ?? null,
+      updatedBy: p.payRate?.updatedBy ?? null,
+    }));
+  }
+
+  async upsertPlatformPayRates(rates: PlatformRateItemDto[], userId: string) {
+    await Promise.all(
+      rates.map((r) =>
+        this.prisma.platformPayRate.upsert({
+          where: { platformId: r.platformId },
+          update: {
+            chauffeurRate: r.chauffeurRate,
+            aideRate: r.aideRate ?? null,
+            updatedById: userId,
+          },
+          create: {
+            platformId: r.platformId,
+            chauffeurRate: r.chauffeurRate,
+            aideRate: r.aideRate ?? null,
+            updatedById: userId,
+          },
+        }),
+      ),
+    );
+    return this.getPlatformPayRates();
   }
 
   // ── Mail config (Resend) ────────────────────────────────────────────────────

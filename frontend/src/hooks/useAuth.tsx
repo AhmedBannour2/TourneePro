@@ -52,8 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (response) => response,
       (error: unknown) => {
         if (typeof error === 'object' && error !== null && 'response' in error) {
-          const axiosError = error as { response?: { status?: number } };
-          if (axiosError.response?.status === 401) {
+          const axiosError = error as { response?: { status?: number }; config?: { url?: string } };
+          const isLoginRequest = axiosError.config?.url?.includes('/auth/login');
+          if (axiosError.response?.status === 401 && !isLoginRequest) {
             // Token expired or invalid, clear auth and redirect
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_user');

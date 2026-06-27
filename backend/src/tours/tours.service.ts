@@ -309,6 +309,7 @@ export class ToursService {
         tourDate: tour.date,
         chauffeurId: assignment.chauffeurId,
         aideId: assignment.aideId,
+        platformId: tour.platformId,
       });
     } catch (err: any) {
       this.logger.error('WorkedDay auto-create failed', err?.message ?? err);
@@ -721,6 +722,7 @@ export class ToursService {
             tourDate: tour.date,
             chauffeurId: assignment.chauffeurId,
             aideId: assignment.aideId,
+            platformId: tour.platformId,
           });
         } catch (err: any) {
           this.logger.error('WorkedDay repair-create failed', err?.message ?? err);

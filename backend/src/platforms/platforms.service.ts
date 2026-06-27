@@ -10,9 +10,13 @@ export class PlatformsService {
 
   async create(createPlatformDto: CreatePlatformDto) {
     try {
-      return await this.prisma.platform.create({
+      const platform = await this.prisma.platform.create({
         data: createPlatformDto,
       });
+      await this.prisma.platformPayRate.create({
+        data: { platformId: platform.id, chauffeurRate: 0, aideRate: null },
+      });
+      return platform;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {

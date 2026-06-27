@@ -17,10 +17,12 @@ import { SettingsModule } from './settings/settings.module';
 import { SystemConfigModule } from './system-config/system-config.module';
 import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    CloudinaryModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
     PrismaModule,

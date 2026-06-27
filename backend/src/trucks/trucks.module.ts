@@ -8,9 +8,10 @@ import { TruckDocumentsController } from './truck-documents.controller';
 import { DocumentExpirySchedulerService } from './document-expiry-scheduler.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationModule } from '../notification/notification.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, NotificationModule, ConfigModule],
+  imports: [PrismaModule, NotificationModule, NotificationsModule, ConfigModule],
   controllers: [TrucksController, InspectionsController, TruckDocumentsController],
   providers: [
     TrucksService,
@@ -18,6 +19,6 @@ import { NotificationModule } from '../notification/notification.module';
     TruckDocumentsService,
     DocumentExpirySchedulerService,
   ],
-  exports: [TrucksService],
+  exports: [TrucksService, DocumentExpirySchedulerService],
 })
 export class TrucksModule {}

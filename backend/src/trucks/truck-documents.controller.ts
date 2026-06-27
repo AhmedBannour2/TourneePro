@@ -16,12 +16,16 @@ import { ApiTags, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { TruckDocumentsService } from './truck-documents.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { UpsertTruckDocumentDto } from './dto/truck-document.dto';
 
 @ApiTags('truck-documents')
 @Controller('trucks/:truckId/documents')
 export class TruckDocumentsController {
-  constructor(private readonly service: TruckDocumentsService) {}
+  constructor(
+    private readonly service: TruckDocumentsService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List all documents for a truck' })
@@ -32,15 +36,19 @@ export class TruckDocumentsController {
   @Post()
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Add a document entry (with optional file upload)' })
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
   upsert(
     @Param('truckId') truckId: string,
     @Body() dto: UpsertTruckDocumentDto,
     @UploadedFile() file: Express.Multer.File | undefined,
     @Request() req: any,
   ) {
-    const userId: string | null = req.user?.id ?? null;
-    return this.service.upsert(truckId, dto, file, userId);
+    return this.service.upsert(truckId, dto, file, req.user?.id ?? null);
   }
 
   @Delete(':documentId')
@@ -51,22 +59,25 @@ export class TruckDocumentsController {
   }
 
   @Get(':documentId/file')
-  @ApiOperation({ summary: 'Download/view a truck document file' })
-  async downloadFile(
+  @ApiOperation({ summary: 'Redirect to the cloud-hosted truck document file' })
+  async getFile(
     @Param('truckId') truckId: string,
     @Param('documentId') documentId: string,
     @Res() res: Response,
   ) {
     const doc = await this.service.findDocumentOrThrow(truckId, documentId);
-    const filePath = this.service.getFilePath(doc);
+    const url = this.service.getFileUrl(doc);
 
-    if (!filePath) {
-      res.status(404).json({ message: 'No file attached to this document' });
-      return;
+    if (!url?.startsWith('https://')) {
+      return res.status(404).json({ message: 'No file attached to this document' });
     }
-
-    res.setHeader('Content-Type', doc.mimeType ?? 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.fileName ?? 'document'}"`);
-    res.sendFile(filePath);
+    const { buffer, contentType } = await this.cloudinary.downloadFile(url);
+    res.set('Content-Type', contentType);
+    res.set(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(doc.fileName ?? 'document')}"`,
+    );
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.send(buffer);
   }
 }

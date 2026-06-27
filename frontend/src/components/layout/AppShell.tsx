@@ -25,17 +25,17 @@ export default function AppShell({ children }: AppShellProps) {
   const title = pageTitles[location.pathname] || 'TourneePro';
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar — desktop only */}
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar — desktop only, fixed height, never scrolls */}
       <div className="hidden md:flex md:flex-shrink-0">
         <Sidebar />
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main content — scrolls independently */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header title={title} />
         {/* pb-24 on mobile reserves space above the fixed bottom nav */}
-        <main className="flex-1 p-4 md:p-6 bg-gray-50 pb-24 md:pb-6 overflow-x-hidden">
+        <main className="flex-1 p-4 md:p-6 bg-gray-50 pb-24 md:pb-6 overflow-y-auto overflow-x-hidden">
           {children}
         </main>
       </div>

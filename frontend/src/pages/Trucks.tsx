@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import {
@@ -18,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -180,6 +181,12 @@ export default function Trucks() {
   const [pendingResponsible, setPendingResponsible] = useState<string>('none');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  // Document preview state
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
+  const [previewDocMime, setPreviewDocMime] = useState<string>('');
+  const [previewDocLoading, setPreviewDocLoading] = useState(false);
+
   // History panel state
   const [historyTruckId, setHistoryTruckId] = useState<string | null>(null);
   const [repairForm, setRepairForm] = useState(emptyRepair);
@@ -191,6 +198,18 @@ export default function Trucks() {
 
   // Panel tab state
   const [activeTab, setActiveTab] = useState('documents');
+
+  // Auto-open truck from notification URL params
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const truckId = searchParams.get('truck');
+    const tab = searchParams.get('tab');
+    if (truckId) {
+      setHistoryTruckId(truckId);
+      if (tab) setActiveTab(tab);
+      setSearchParams({}, { replace: true });
+    }
+  }, []);
 
   // Document upload state
   const [docType, setDocType] = useState<TruckDocumentType>('ASSURANCE');
@@ -391,6 +410,31 @@ export default function Trucks() {
     }
   };
 
+  const openDocPreview = async (doc: TruckDocument) => {
+    setPreviewDocId(doc.id);
+    setPreviewDocUrl(null);
+    setPreviewDocMime(doc.mimeType ?? '');
+    setPreviewDocLoading(true);
+    try {
+      if (historyTruckId) {
+        const res = await api.get(`/trucks/${historyTruckId}/documents/${doc.id}/file`, { responseType: 'blob' });
+        setPreviewDocMime(res.data.type || doc.mimeType || '');
+        setPreviewDocUrl(URL.createObjectURL(res.data));
+      }
+    } catch {
+      error('Impossible de charger le document');
+    } finally {
+      setPreviewDocLoading(false);
+    }
+  };
+
+  const closeDocPreview = () => {
+    if (previewDocUrl) URL.revokeObjectURL(previewDocUrl);
+    setPreviewDocId(null);
+    setPreviewDocUrl(null);
+    setPreviewDocMime('');
+  };
+
   const isPending = createMutation.isPending || updateMutation.isPending;
   const available = trucks?.filter((t) => t.isAvailable).length ?? 0;
   const unavailable = trucks?.filter((t) => !t.isAvailable).length ?? 0;
@@ -583,6 +627,7 @@ export default function Trucks() {
         }
       }}>
         <SheetContent side="right" className="sm:max-w-2xl w-full overflow-y-auto">
+          <SheetTitle className="sr-only">{historyTruck?.immatriculation ?? 'Détail camion'}</SheetTitle>
           <div className="mb-6">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -663,15 +708,13 @@ export default function Trucks() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Badge className={`text-xs ${st.cls}`}>{st.label}</Badge>
                         {latest?.filePath && (
-                          <a
-                            href={`${API_URL}/trucks/${historyTruckId}/documents/${latest.id}/file`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
                             className="p-1 rounded hover:bg-gray-100"
                             title="Voir le fichier"
+                            onClick={() => openDocPreview(latest)}
                           >
                             <Eye className="h-4 w-4 text-blue-500" />
-                          </a>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -686,9 +729,9 @@ export default function Trucks() {
                             </span>
                             <div className="flex items-center gap-1">
                               {d.filePath && (
-                                <a href={`${API_URL}/trucks/${historyTruckId}/documents/${d.id}/file`} target="_blank" rel="noopener noreferrer">
+                                <button onClick={() => openDocPreview(d)}>
                                   <Eye className="h-3.5 w-3.5 text-blue-400" />
-                                </a>
+                                </button>
                               )}
                               <button onClick={() => deleteDocMutation.mutate(d.id)} className="hover:text-red-500">
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -1036,6 +1079,7 @@ export default function Trucks() {
       {lightboxSrc && (
         <Dialog open onOpenChange={(open) => !open && setLightboxSrc(null)}>
           <DialogContent className="max-w-3xl p-2">
+            <DialogTitle className="sr-only">Photo inspection</DialogTitle>
             <img
               src={lightboxSrc}
               alt="Photo inspection"
@@ -1044,6 +1088,39 @@ export default function Trucks() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ── Document preview dialog ─────────────────────────────────────────── */}
+      <Dialog open={!!previewDocId} onOpenChange={(open) => { if (!open) closeDocPreview(); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Aperçu du document</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-center min-h-48 max-h-[75vh]">
+            {previewDocLoading ? (
+              <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+            ) : previewDocUrl ? (
+              previewDocMime === 'application/pdf' ? (
+                <div className="flex flex-col items-center gap-4 py-10">
+                  <svg className="w-16 h-16 text-red-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+                    <text x="7" y="17" fontSize="4" fill="white" fontWeight="bold">PDF</text>
+                  </svg>
+                  <button
+                    onClick={() => window.open(previewDocUrl, '_blank')}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    Ouvrir le PDF
+                  </button>
+                </div>
+              ) : (
+                <img src={previewDocUrl} alt="Document" className="max-w-full max-h-[70vh] object-contain rounded-lg" />
+              )
+            ) : (
+              <p className="text-gray-400 text-sm">Impossible de charger le document.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

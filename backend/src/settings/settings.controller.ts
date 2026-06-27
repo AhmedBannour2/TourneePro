@@ -16,7 +16,9 @@ import { Roles } from '../auth/decorators';
 import { UserRole } from '../auth/dto/register.dto';
 import { SettingsService } from './settings.service';
 import { MailService } from '../notification/mail.service';
+import { DocumentExpirySchedulerService } from '../trucks/document-expiry-scheduler.service';
 import { UpsertGlobalPayRatesDto } from './dto/upsert-global-pay-rates.dto';
+import { UpsertPlatformPayRatesDto } from './dto/upsert-platform-pay-rates.dto';
 import { MailConfigDto } from './dto/mail-config.dto';
 
 @ApiTags('settings')
@@ -26,6 +28,7 @@ export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,
     private readonly mailService: MailService,
+    private readonly docExpiryScheduler: DocumentExpirySchedulerService,
   ) {}
 
   @Get('pay-rates')
@@ -40,6 +43,20 @@ export class SettingsController {
   @ApiOperation({ summary: 'Update global default pay rates (admin only)' })
   upsertGlobalPayRates(@Body() dto: UpsertGlobalPayRatesDto, @Request() req: any) {
     return this.settingsService.upsertGlobalPayRates(dto.rates, req.user.id);
+  }
+
+  @Get('platform-pay-rates')
+  @ApiOperation({ summary: 'Get platform-specific pay rates' })
+  getPlatformPayRates() {
+    return this.settingsService.getPlatformPayRates();
+  }
+
+  @Put('platform-pay-rates')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Update platform-specific pay rates (admin only)' })
+  upsertPlatformPayRates(@Body() dto: UpsertPlatformPayRatesDto, @Request() req: any) {
+    return this.settingsService.upsertPlatformPayRates(dto.rates, req.user.id);
   }
 
   @Get('mail')
@@ -80,5 +97,16 @@ export class SettingsController {
         HttpStatus.BAD_GATEWAY,
       );
     }
+  }
+
+  @Post('trigger-doc-expiry-check')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @ApiOperation({
+    summary: 'Manually trigger document expiry check (creates in-app notifications)',
+  })
+  async triggerDocExpiryCheck() {
+    await this.docExpiryScheduler.checkExpiringDocuments();
+    return { triggered: true };
   }
 }

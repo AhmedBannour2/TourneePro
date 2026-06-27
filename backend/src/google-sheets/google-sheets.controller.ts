@@ -104,4 +104,24 @@ export class GoogleSheetsController {
   sync() {
     return this.googleSheetsService.syncFromSheets();
   }
+
+  // ── Export ─────────────────────────────────────────────────────────────────
+
+  @Get('google-sheets/export/check')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Check for missing data before exporting' })
+  checkExport(@Query('date') date: string) {
+    return this.googleSheetsService.checkAffectations(date);
+  }
+
+  @Post('google-sheets/export')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export daily assignments to the persistent STP Google Sheet' })
+  exportAffectations(@Query('date') date: string) {
+    return this.googleSheetsService.exportAffectations(date);
+  }
 }

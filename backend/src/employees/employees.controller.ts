@@ -16,9 +16,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { mkdirSync, createReadStream, existsSync } from 'fs';
+import { memoryStorage } from 'multer';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -30,6 +28,7 @@ import {
 } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
 import { TrucksService } from '../trucks/trucks.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { CreateEmployeeAccountDto } from './dto/create-account.dto';
@@ -48,6 +47,7 @@ export class EmployeesController {
   constructor(
     private readonly employeesService: EmployeesService,
     private readonly trucksService: TrucksService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -186,6 +186,28 @@ export class EmployeesController {
     return this.employeesService.upsertPayRates(id, body.rates as any, req.user.id);
   }
 
+  @Get(':id/platform-pay-rates')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get platform pay rates for an employee' })
+  @ApiParam({ name: 'id', description: 'Employee UUID' })
+  getEmployeePlatformPayRates(@Param('id') id: string) {
+    return this.employeesService.getEmployeePlatformPayRates(id);
+  }
+
+  @Put(':id/platform-pay-rates')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({ summary: 'Upsert platform pay rates for an employee' })
+  @ApiParam({ name: 'id', description: 'Employee UUID' })
+  upsertEmployeePlatformPayRates(
+    @Param('id') id: string,
+    @Body()
+    body: { rates: { platformId: string; chauffeurRate: number; aideRate?: number | null }[] },
+    @Request() req: any,
+  ) {
+    return this.employeesService.upsertEmployeePlatformPayRates(id, body.rates, req.user.id);
+  }
+
   @Get(':id/documents')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'List documents for an employee' })
@@ -199,17 +221,7 @@ export class EmployeesController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (req, _file, cb) => {
-          const dir = join(process.cwd(), 'uploads', 'employees', req.params.id);
-          mkdirSync(dir, { recursive: true });
-          cb(null, dir);
-        },
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${unique}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
@@ -237,17 +249,16 @@ export class EmployeesController {
 
   @Get(':id/documents/:docId/download')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Download a document' })
+  @ApiOperation({ summary: 'Redirect to the cloud-hosted document file' })
   async downloadDocument(@Param('id') id: string, @Param('docId') docId: string, @Res() res: any) {
     const doc = await this.employeesService.findDocument(id, docId);
-    if (!existsSync(doc.filePath)) {
-      return res.status(404).json({ message: 'File not found on disk' });
+    if (!doc.filePath?.startsWith('https://')) {
+      return res.status(404).json({ message: 'File not available' });
     }
-    res.setHeader('Content-Type', doc.mimeType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(doc.originalName)}"`,
-    );
-    createReadStream(doc.filePath).pipe(res);
+    const { buffer, contentType } = await this.cloudinary.downloadFile(doc.filePath);
+    res.set('Content-Type', contentType);
+    res.set('Content-Disposition', `inline; filename="${encodeURIComponent(doc.originalName)}"`);
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.send(buffer);
   }
 }

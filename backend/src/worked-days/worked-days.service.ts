@@ -28,6 +28,7 @@ export const SYSTEM_PAY_DEFAULTS: Record<
 export const EXPRESS_PAY: Record<ExpressMissionType, number> = {
   STANDARD: 30,
   GV: 50,
+  AUTRE: 0,
 };
 
 // ── Tour type detection from tour code ────────────────────────────────────────
@@ -88,6 +89,30 @@ export class WorkedDaysService {
     return role === EmployeeRole.CHAUFFEUR ? defaults.chauffeurRate : (defaults.aideRate ?? 0);
   }
 
+  // For custom platforms (Creil, Coignières…): check platform-specific rate first.
+  // Returns null if no platform rate is configured (caller falls back to tour-type rate).
+  private async getPlatformPayRate(
+    employeeId: string,
+    platformId: string,
+    role: EmployeeRole,
+  ): Promise<number | null> {
+    // Priority 1: employee override for this platform
+    const empRate = await this.prisma.employeePlatformPayRate.findUnique({
+      where: { employeeId_platformId: { employeeId, platformId } },
+    });
+    if (empRate && empRate.chauffeurRate > 0) {
+      return role === EmployeeRole.CHAUFFEUR ? empRate.chauffeurRate : (empRate.aideRate ?? 0);
+    }
+
+    // Priority 2: global platform rate
+    const platRate = await this.prisma.platformPayRate.findUnique({ where: { platformId } });
+    if (platRate && platRate.chauffeurRate > 0) {
+      return role === EmployeeRole.CHAUFFEUR ? platRate.chauffeurRate : (platRate.aideRate ?? 0);
+    }
+
+    return null;
+  }
+
   // ── finalPay recalculation ─────────────────────────────────────────────────
 
   private computeFinalPay(
@@ -117,8 +142,9 @@ export class WorkedDaysService {
     tourDate: Date;
     chauffeurId: string | null;
     aideId: string | null;
+    platformId?: string | null;
   }) {
-    const { tourId, tourCode, tourDate, chauffeurId, aideId } = params;
+    const { tourId, tourCode, tourDate, chauffeurId, aideId, platformId } = params;
     const tourType = detectTourType(tourCode);
     // Use UTC midnight to avoid timezone offset shifting the stored date
     const d = new Date(tourDate);
@@ -130,10 +156,18 @@ export class WorkedDaysService {
       data: { status: WorkedDayStatus.CANCELLED },
     });
 
+    const resolveBasePay = async (employeeId: string, role: EmployeeRole): Promise<number> => {
+      if (platformId) {
+        const platPay = await this.getPlatformPayRate(employeeId, platformId, role);
+        if (platPay !== null) return platPay;
+      }
+      return this.getPayRate(employeeId, tourType, role);
+    };
+
     const creates: Promise<any>[] = [];
 
     if (chauffeurId) {
-      const basePay = await this.getPayRate(chauffeurId, tourType, EmployeeRole.CHAUFFEUR);
+      const basePay = await resolveBasePay(chauffeurId, EmployeeRole.CHAUFFEUR);
       creates.push(
         this.prisma.workedDay.create({
           data: {
@@ -151,7 +185,7 @@ export class WorkedDaysService {
     }
 
     if (aideId) {
-      const basePay = await this.getPayRate(aideId, tourType, EmployeeRole.AIDE);
+      const basePay = await resolveBasePay(aideId, EmployeeRole.AIDE);
       creates.push(
         this.prisma.workedDay.create({
           data: {

@@ -1,20 +1,17 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { TruckDocumentType } from '@prisma/client';
-import * as fs from 'fs';
-import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { UpsertTruckDocumentDto } from './dto/truck-document.dto';
 
 @Injectable()
 export class TruckDocumentsService {
   private readonly logger = new Logger(TruckDocumentsService.name);
-  private readonly uploadsDir = path.join(process.cwd(), 'uploads', 'truck-documents');
 
-  constructor(private readonly prisma: PrismaService) {
-    if (!fs.existsSync(this.uploadsDir)) {
-      fs.mkdirSync(this.uploadsDir, { recursive: true });
-    }
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async list(truckId: string) {
     await this.assertTruckExists(truckId);
@@ -38,16 +35,15 @@ export class TruckDocumentsService {
     let mimeType: string | undefined;
 
     if (file) {
-      const truckDir = path.join(this.uploadsDir, truckId);
-      if (!fs.existsSync(truckDir)) fs.mkdirSync(truckDir, { recursive: true });
-
-      const safeName = `${Date.now()}_${file.originalname.replace(/[^A-Za-z0-9._-]/g, '_')}`;
-      const dest = path.join(truckDir, safeName);
-      fs.writeFileSync(dest, file.buffer);
-
-      filePath = path.join('truck-documents', truckId, safeName);
+      filePath = await this.cloudinary.uploadBuffer(
+        file.buffer,
+        file.mimetype,
+        `tournee-pro/truck-docs/${truckId}`,
+        file.originalname,
+      );
       fileName = file.originalname;
       mimeType = file.mimetype;
+      this.logger.log(`Truck doc uploaded to Cloudinary: ${filePath}`);
     }
 
     return this.prisma.truckDocument.create({
@@ -70,17 +66,15 @@ export class TruckDocumentsService {
     });
     if (!doc) throw new NotFoundException('Document not found');
 
-    if (doc.filePath) {
-      const abs = path.join(process.cwd(), 'uploads', doc.filePath);
-      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    if (doc.filePath?.startsWith('https://')) {
+      await this.cloudinary.deleteByUrl(doc.filePath);
     }
 
     await this.prisma.truckDocument.delete({ where: { id: documentId } });
   }
 
-  getFilePath(doc: { filePath: string | null }): string | null {
-    if (!doc.filePath) return null;
-    return path.join(process.cwd(), 'uploads', doc.filePath);
+  getFileUrl(doc: { filePath: string | null }): string | null {
+    return doc.filePath ?? null;
   }
 
   async findDocumentOrThrow(truckId: string, documentId: string) {
@@ -91,7 +85,6 @@ export class TruckDocumentsService {
     return doc;
   }
 
-  // Used by the expiry scheduler — returns all docs with upcoming or past expiry
   async findExpiringDocuments(withinDays: number) {
     const now = new Date();
     const threshold = new Date(now);
@@ -101,9 +94,7 @@ export class TruckDocumentsService {
       where: {
         expiryDate: { not: null, lte: threshold },
       },
-      include: {
-        truck: true,
-      },
+      include: { truck: true },
       orderBy: { expiryDate: 'asc' },
     });
   }
