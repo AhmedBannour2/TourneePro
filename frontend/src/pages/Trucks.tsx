@@ -422,7 +422,7 @@ export default function Trucks() {
         setPreviewDocUrl(URL.createObjectURL(res.data));
       }
     } catch {
-      error('Impossible de charger le document');
+      console.error('Impossible de charger le document');
     } finally {
       setPreviewDocLoading(false);
     }
