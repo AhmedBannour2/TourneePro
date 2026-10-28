@@ -242,6 +242,46 @@ export class BoulangerParserService {
       }
     }
 
+    // Afternoon ("Après-midi") block — same column shape as the morning blocks
+    // (Quai=o, TRN=o+1, Société=o+2, Immat=o+3, Contact=o+4, Tél=o+5 at offset 34), but a
+    // separate section lower on the sheet (rows 32-49) with its own tour numbers (200s range).
+    const afternoonOffset = 34;
+    for (let rowNum = 32; rowNum <= 49; rowNum++) {
+      const row = ws.getRow(rowNum);
+      const o = afternoonOffset;
+      const quaiRaw = this.getCellValue(row, o);
+      const trnRaw = this.getCellValue(row, o + 1);
+      const societeRaw = this.getCellValue(row, o + 2);
+      const immatRaw = this.getCellValue(row, o + 3);
+      const contactRaw = this.getCellValue(row, o + 4);
+      const telRaw = this.getCellValue(row, o + 5);
+
+      if (!trnRaw && !societeRaw) continue;
+
+      const tourNumber = this.parseTourNumber(trnRaw);
+      if (tourNumber === null) continue;
+
+      allRows.push({
+        tourNumber,
+        // Rows here are structurally in the afternoon block — always 'Après-midi',
+        // regardless of whether the company name happens to contain "Mono"/"GV"/etc.
+        tourType: 'Après-midi',
+        platform: 'F166',
+        date: date || new Date(),
+        dateStr: alfortDateStr,
+        horaire: 'Après-midi',
+        quai: quaiRaw != null ? String(quaiRaw).trim() : null,
+        nbColis: null,
+        prestataire: String(societeRaw || '').trim(),
+        immatriculation: this.cleanPlate(immatRaw),
+        equipage1: contactRaw ? String(contactRaw).trim() : null,
+        equipage2: null,
+        telephone: telRaw ? this.cleanPhone(String(telRaw)) : null,
+        sourceSheet: ws.name,
+        sourceRow: rowNum,
+      });
+    }
+
     const stpRows = allRows.filter((r) => this.isStp(r.prestataire));
     this.logger.log(`Alfortville: ${allRows.length} total rows, ${stpRows.length} STP rows`);
 
@@ -307,6 +347,40 @@ export class BoulangerParserService {
           sourceRow: rowNum,
         });
       }
+    }
+
+    // Afternoon ("Après-midi") block — same column shape as the morning blocks
+    // (Quai=o, TRN=o+1, Société=o+2, Immat=o+3, Contact=o+4, Tél=o+5 at offset 34), but a
+    // separate section lower on the sheet (rows 32-49) with its own tour numbers (200s range).
+    const afternoonOffset = 34;
+    for (let rowNum = 32; rowNum <= 49; rowNum++) {
+      const r = grid[rowNum - 1];
+      if (!r) continue;
+      const o = afternoonOffset;
+      const trnRaw = r[o + 1] ?? null;
+      const societeRaw = r[o + 2] ?? null;
+      if (!trnRaw && !societeRaw) continue;
+      const tourNumber = this.parseTourNumber(trnRaw);
+      if (tourNumber === null) continue;
+      allRows.push({
+        tourNumber,
+        // Rows here are structurally in the afternoon block — always 'Après-midi',
+        // regardless of whether the company name happens to contain "Mono"/"GV"/etc.
+        tourType: 'Après-midi',
+        platform: 'F166',
+        date: date || new Date(),
+        dateStr: alfortDateStr,
+        horaire: 'Après-midi',
+        quai: r[o] != null ? String(r[o]).trim() : null,
+        nbColis: null,
+        prestataire: String(societeRaw || '').trim(),
+        immatriculation: this.cleanPlate(r[o + 3]),
+        equipage1: r[o + 4] ? String(r[o + 4]).trim() : null,
+        equipage2: null,
+        telephone: r[o + 5] ? this.cleanPhone(String(r[o + 5])) : null,
+        sourceSheet: sheetName,
+        sourceRow: rowNum,
+      });
     }
 
     const stpRows = allRows.filter((r) => this.isStp(r.prestataire));
@@ -463,7 +537,7 @@ export class BoulangerParserService {
     if (tourNumber >= 600 && tourNumber <= 699) return 'Mono';
     if (tourNumber >= 700 && tourNumber <= 799) return 'GV';
     if (tourNumber >= 800 && tourNumber <= 899) return 'Standard';
-    if (tourNumber >= 250 && tourNumber <= 299) return 'Après-midi';
+    if (tourNumber >= 200 && tourNumber <= 299) return 'Après-midi';
 
     return 'Unknown';
   }

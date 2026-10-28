@@ -164,10 +164,11 @@ export class GoogleSheetsService {
         );
 
         if (alfortSheetName) {
-          // Fetch main Alfortville sheet
+          // Fetch main Alfortville sheet — rows 1-28 are the morning blocks (7H-8H30),
+          // rows 32-49 are the afternoon ("Après-midi") block, tour numbers in the 200s
           const res = await sheetsApi.spreadsheets.values.get({
             spreadsheetId: sheetId,
-            range: `'${alfortSheetName}'!A1:AO28`,
+            range: `'${alfortSheetName}'!A1:AO49`,
             valueRenderOption: 'UNFORMATTED_VALUE',
           });
           const grid: any[][] = res.data.values ?? [];
@@ -179,7 +180,6 @@ export class GoogleSheetsService {
             return l.includes('jours') && (l.includes('rie') || l.includes('dimanche'));
           });
           if (joursFerriesName) {
-            this.logger.log(`Parsing Jours Fériés/Dimanche sheet: ${joursFerriesName}`);
             try {
               const resJF = await sheetsApi.spreadsheets.values.get({
                 spreadsheetId: sheetId,
@@ -188,21 +188,36 @@ export class GoogleSheetsService {
               });
               const gridJF: any[][] = resJF.data.values ?? [];
               const parsedJF = this.parser.parseAlfortvilleGrid(gridJF, joursFerriesName);
-              this.logger.log(
-                `Jours Fériés dates: ${parsedJF.stpRows.map((r) => r.dateStr).join(', ')}`,
-              );
-              // Merge STP rows from both sheets — deduplicate by tourCode
-              const existingCodes = new Set(parsed.stpRows.map((r) => String(r.tourNumber)));
-              const newRows = parsedJF.stpRows.filter(
-                (r) => !existingCodes.has(String(r.tourNumber)),
-              );
-              parsed = {
-                ...parsed,
-                allRows: [...parsed.allRows, ...parsedJF.allRows],
-                stpRows: [...parsed.stpRows, ...newRows],
-                totalRows: parsed.totalRows + parsedJF.totalRows,
-              };
-              this.logger.log(`Jours Fériés/Dimanche: ${parsedJF.stpRows.length} STP rows merged`);
+
+              // Boulanger only sets this sheet's own date (B1) to tomorrow when they're
+              // actually using it for an upcoming Sunday/holiday — otherwise it's left
+              // stale from whenever it was last prepared. Only merge when it's current,
+              // so we never import leftover tours from a past Sunday/holiday.
+              const tomorrow = this.parser.tomorrowDate();
+              const tomorrowStr = this.toLocalDateStr(tomorrow);
+              const jfDateStr = this.toLocalDateStr(parsedJF.date);
+
+              if (jfDateStr !== tomorrowStr) {
+                this.logger.log(
+                  `Jours Fériés/Dimanche sheet dated ${jfDateStr}, not tomorrow (${tomorrowStr}) — skipped`,
+                );
+              } else {
+                this.logger.log(`Parsing Jours Fériés/Dimanche sheet: ${joursFerriesName}`);
+                // Merge STP rows from both sheets — deduplicate by tourCode
+                const existingCodes = new Set(parsed.stpRows.map((r) => String(r.tourNumber)));
+                const newRows = parsedJF.stpRows.filter(
+                  (r) => !existingCodes.has(String(r.tourNumber)),
+                );
+                parsed = {
+                  ...parsed,
+                  allRows: [...parsed.allRows, ...parsedJF.allRows],
+                  stpRows: [...parsed.stpRows, ...newRows],
+                  totalRows: parsed.totalRows + parsedJF.totalRows,
+                };
+                this.logger.log(
+                  `Jours Fériés/Dimanche: ${parsedJF.stpRows.length} STP rows merged`,
+                );
+              }
             } catch (e: any) {
               this.logger.warn(`Could not parse Jours Fériés sheet: ${e.message}`);
             }
@@ -720,5 +735,10 @@ export class GoogleSheetsService {
   private extractSheetId(url: string): string | null {
     const match = url.match(/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
     return match?.[1] ?? null;
+  }
+
+  // Local-date (not UTC) string — never toISOString(), to avoid timezone shifting the day.
+  private toLocalDateStr(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 }
