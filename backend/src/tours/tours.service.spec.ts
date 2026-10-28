@@ -384,6 +384,24 @@ describe('ToursService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException when delivered and absent are both zero but totalClients > 0', async () => {
+      const tourWithAssignment = {
+        ...mockTour,
+        assignments: [{ id: 'assign-1', chauffeurId: 'emp-1', aideId: null }],
+      };
+      mockPrismaService.employee.findUnique.mockResolvedValue({ id: 'emp-1', name: 'Jean' });
+      mockPrismaService.tour.findUnique.mockResolvedValue(tourWithAssignment);
+      mockPrismaService.tourConfirmation.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.confirmTour(
+          'tour-uuid-1',
+          { totalClients: 10, delivered: 0, absent: 0, nonConform: 0 },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('throws BadRequestException when d3e > 0 and no confirmation photo was uploaded', async () => {
       const tourWithAssignment = {
         ...mockTour,

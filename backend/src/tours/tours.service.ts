@@ -558,6 +558,14 @@ export class ToursService {
 
   // ── Tour confirmation ─────────────────────────────────────────────────────
 
+  // Guards against saving a confirmation that reports nothing: clients were declared
+  // but neither delivered nor marked absent.
+  private assertDeliveryAccountedFor(dto: ConfirmTourDto) {
+    if (dto.totalClients > 0 && dto.delivered === 0 && dto.absent === 0) {
+      throw new BadRequestException('Livrés et absents ne peuvent pas être tous les deux à zéro');
+    }
+  }
+
   async confirmTour(tourId: string, dto: ConfirmTourDto, userId: string) {
     const employee = await this.prisma.employee.findUnique({ where: { userId } });
     if (!employee) throw new ForbiddenException('No employee profile linked to this account');
@@ -573,6 +581,7 @@ export class ToursService {
     if (dto.delivered + dto.absent > dto.totalClients) {
       throw new BadRequestException('Delivered + absent exceeds total clients');
     }
+    this.assertDeliveryAccountedFor(dto);
 
     if ((dto.d3e ?? 0) > 0 && tour.confirmationPhotos.length === 0) {
       throw new BadRequestException(
@@ -631,6 +640,7 @@ export class ToursService {
     if (dto.delivered + dto.absent > dto.totalClients) {
       throw new BadRequestException('Delivered + absent exceeds total clients');
     }
+    this.assertDeliveryAccountedFor(dto);
 
     const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
     if (existing) throw new BadRequestException('Tour already confirmed — use PATCH to update');
@@ -666,6 +676,7 @@ export class ToursService {
     if (dto.delivered + dto.absent > dto.totalClients) {
       throw new BadRequestException('Delivered + absent exceeds total clients');
     }
+    this.assertDeliveryAccountedFor(dto);
 
     const updated = await this.prisma.tourConfirmation.update({
       where: { tourId },
@@ -698,6 +709,7 @@ export class ToursService {
     if (dto.delivered + dto.absent > dto.totalClients) {
       throw new BadRequestException('Delivered + absent exceeds total clients');
     }
+    this.assertDeliveryAccountedFor(dto);
 
     const tour = await this.findOne(tourId);
     if ((dto.d3e ?? 0) > 0 && tour.confirmationPhotos.length === 0) {

@@ -563,7 +563,8 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
   const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
   const total = n(f.totalClients);
   const sum   = n(f.delivered) + n(f.absent);
-  const valid = total > 0 && sum <= total && f.d3e !== '';
+  const nothingAccountedFor = total > 0 && n(f.delivered) === 0 && n(f.absent) === 0;
+  const valid = total > 0 && sum <= total && f.d3e !== '' && !nothingAccountedFor;
 
   const addFiles = (files: FileList | null) => {
     if (!files) return;
@@ -636,6 +637,11 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
                 <span>{n(f.delivered)} + {n(f.absent)} = {sum}</span>
                 <span>/ Total : {total}</span>
               </div>
+            )}
+            {nothingAccountedFor && (
+              <p className="text-xs text-red-600 -mt-2">
+                Livrés et absents ne peuvent pas être tous les deux à zéro
+              </p>
             )}
             <div>
               <Label>D3E <span className="text-xs font-normal text-gray-400">(appareils repris)</span></Label>

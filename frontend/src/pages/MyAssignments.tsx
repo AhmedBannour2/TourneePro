@@ -87,7 +87,8 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
   const hasD3E = f.d3e !== '';
   const needsPhoto = hasD3E && n(f.d3e) > 0;
   const hasPhoto = existingPhotos.length > 0 || photoFiles.length > 0;
-  const valid = total > 0 && sum <= total && hasD3E && (!needsPhoto || hasPhoto);
+  const nothingAccountedFor = total > 0 && n(f.delivered) === 0 && n(f.absent) === 0;
+  const valid = total > 0 && sum <= total && hasD3E && (!needsPhoto || hasPhoto) && !nothingAccountedFor;
   const sumOk = total > 0 && sum <= total;
 
   const addFiles = (files: FileList | null) => {
@@ -159,6 +160,11 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
                 <span>{n(f.delivered)} + {n(f.absent)} = {sum}</span>
                 <span>/ Total: {total}</span>
               </div>
+            )}
+            {nothingAccountedFor && (
+              <p className="text-xs text-red-600 -mt-2">
+                Livrés et absents ne peuvent pas être tous les deux à zéro
+              </p>
             )}
             <div>
               <Label>D3E (appareils repris) <span className="text-red-500">*</span></Label>
