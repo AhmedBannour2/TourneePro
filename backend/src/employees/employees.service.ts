@@ -455,6 +455,7 @@ export class EmployeesService {
       confirmation: {
         include: { confirmedBy: { select: { id: true, name: true } } },
       },
+      confirmationPhotos: { select: { id: true, url: true, uploadedAt: true } },
     } as const;
 
     const [upcomingRaw, historyRaw] = await Promise.all([
@@ -492,6 +493,7 @@ export class EmployeesService {
           truck: assignment?.truck ? { immatriculation: assignment.truck.immatriculation } : null,
           confirmationStatus: tour.confirmationStatus,
           confirmation: tour.confirmation ?? null,
+          confirmationPhotos: tour.confirmationPhotos,
         };
       });
 

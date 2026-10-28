@@ -10,12 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { WorkedDaysService } from './worked-days.service';
 import { GetWorkedDaysQueryDto } from './dto/get-worked-days-query.dto';
 import { OverrideWorkedDayDto } from './dto/override-worked-day.dto';
@@ -86,11 +81,7 @@ export class WorkedDaysController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
   @ApiOperation({ summary: 'Dispatcher overrides the pay for a worked day' })
   @ApiParam({ name: 'id' })
-  override(
-    @Param('id') id: string,
-    @Body() dto: OverrideWorkedDayDto,
-    @Request() req: any,
-  ) {
+  override(@Param('id') id: string, @Body() dto: OverrideWorkedDayDto, @Request() req: any) {
     return this.workedDaysService.override(id, dto, req.user.id);
   }
 
@@ -112,11 +103,7 @@ export class WorkedDaysController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
   @ApiOperation({ summary: 'Add an express mission to a worked day' })
   @ApiParam({ name: 'id' })
-  addExpress(
-    @Param('id') id: string,
-    @Body() dto: AddExpressDto,
-    @Request() req: any,
-  ) {
+  addExpress(@Param('id') id: string, @Body() dto: AddExpressDto, @Request() req: any) {
     return this.workedDaysService.addExpress(id, dto, req.user.id);
   }
 

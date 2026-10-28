@@ -12,12 +12,17 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
-import { ImportsService } from './imports.service';
 import {
-  ImportBatchResponseDto,
-  PaginatedImportRowsDto,
-} from './dto/import-batch-response.dto';
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiConsumes,
+  ApiBody,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
+import { ImportsService } from './imports.service';
+import { ImportBatchResponseDto, PaginatedImportRowsDto } from './dto/import-batch-response.dto';
 import { GetImportRowsQueryDto } from './dto/get-import-rows-query.dto';
 
 @ApiTags('imports')
@@ -28,22 +33,34 @@ export class ImportsController {
 
   @Get()
   @ApiOperation({ summary: 'List recent import batches' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Max results (default 10)' })
-  @ApiResponse({ status: 200, description: 'Recent import batches', type: [ImportBatchResponseDto] })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Max results (default 10)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Recent import batches',
+    type: [ImportBatchResponseDto],
+  })
   async listBatches(@Query('limit') limit?: string) {
     return this.importsService.listBatches(limit ? parseInt(limit, 10) : 10);
   }
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file', {
-    storage: memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      const isXlsx = file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        || file.originalname.toLowerCase().endsWith('.xlsx');
-      cb(isXlsx ? null : new BadRequestException('Only .xlsx files are allowed'), isXlsx);
-    },
-  }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const isXlsx =
+          file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+          file.originalname.toLowerCase().endsWith('.xlsx');
+        cb(isXlsx ? null : new BadRequestException('Only .xlsx files are allowed'), isXlsx);
+      },
+    }),
+  )
   @ApiOperation({ summary: 'Upload an Excel file for import' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -87,16 +104,8 @@ export class ImportsController {
     type: PaginatedImportRowsDto,
   })
   @ApiResponse({ status: 404, description: 'Import batch not found' })
-  async getImportRows(
-    @Param('id') id: string,
-    @Query() query: GetImportRowsQueryDto,
-  ) {
-    return this.importsService.getImportRows(
-      id,
-      query.status,
-      query.page,
-      query.limit,
-    );
+  async getImportRows(@Param('id') id: string, @Query() query: GetImportRowsQueryDto) {
+    return this.importsService.getImportRows(id, query.status, query.page, query.limit);
   }
 
   @Post(':id/commit')

@@ -25,6 +25,10 @@ interface TourConfirmation {
   confirmedBy: { id: string; name: string };
 }
 
+interface ConfirmationPhoto {
+  id: string; url: string; uploadedAt: string;
+}
+
 interface TourItem {
   id: string; tourCode: string; date: string; platform: string;
   quai: string | null; horaire: string | null;
@@ -33,6 +37,7 @@ interface TourItem {
   truck: { immatriculation: string } | null;
   confirmationStatus: 'UNCONFIRMED' | 'CONFIRMED';
   confirmation: TourConfirmation | null;
+  confirmationPhotos: ConfirmationPhoto[];
 }
 
 interface AssignmentsResponse {
@@ -42,10 +47,6 @@ interface AssignmentsResponse {
 
 type ExpressType   = 'STANDARD' | 'GV' | 'AUTRE';
 type ExpressStatus = 'PENDING' | 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
-
-interface ConfirmationPhoto {
-  id: string; url: string; uploadedAt: string;
-}
 
 interface ExpressItem {
   id: string; type: ExpressType; date: string; status: ExpressStatus;
@@ -76,18 +77,42 @@ const fromConf = (c: TourConfirmation): Fields => ({
 function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () => void; onSaved: () => void }) {
   const isEdit = tour.confirmationStatus === 'CONFIRMED';
   const [f, setF] = useState<Fields>(isEdit && tour.confirmation ? fromConf(tour.confirmation) : EMPTY);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [existingPhotos, setExistingPhotos] = useState(tour.confirmationPhotos);
   const { success, error, toasts, removeToast } = useToast();
 
   const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
   const total = n(f.totalClients);
   const sum   = n(f.delivered) + n(f.absent);
   const hasD3E = f.d3e !== '';
-  const valid = total > 0 && sum <= total && hasD3E;
+  const needsPhoto = hasD3E && n(f.d3e) > 0;
+  const hasPhoto = existingPhotos.length > 0 || photoFiles.length > 0;
+  const valid = total > 0 && sum <= total && hasD3E && (!needsPhoto || hasPhoto);
   const sumOk = total > 0 && sum <= total;
 
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    setPhotoFiles(prev => [...prev, ...Array.from(files)]);
+  };
+  const removeFile = (idx: number) => setPhotoFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const deletePhotoMut = useMutation({
+    mutationFn: (photoId: string) => api.delete(`/tours/${tour.id}/confirmation-photos/${photoId}`),
+    onSuccess: (_d, photoId) => setExistingPhotos(prev => prev.filter(p => p.id !== photoId)),
+    onError: (e: any) => error(e.response?.data?.message || 'Erreur'),
+  });
+
   const mut = useMutation({
-    mutationFn: (body: object) =>
-      isEdit ? api.patch(`/tours/${tour.id}/confirm`, body) : api.post(`/tours/${tour.id}/confirm`, body),
+    mutationFn: async (body: object) => {
+      for (const file of photoFiles) {
+        const form = new FormData();
+        form.append('file', file);
+        await api.post(`/tours/${tour.id}/confirmation-photos`, form, {
+          headers: { 'Content-Type': undefined as unknown as string },
+        });
+      }
+      return isEdit ? api.patch(`/tours/${tour.id}/confirm`, body) : api.post(`/tours/${tour.id}/confirm`, body);
+    },
     onSuccess: () => { success(isEdit ? 'Confirmation mise à jour' : 'Tournée confirmée !'); onSaved(); onClose(); },
     onError: (e: any) => error(e.response?.data?.message || 'Erreur'),
   });
@@ -138,8 +163,49 @@ function ConfirmModal({ tour, onClose, onSaved }: { tour: TourItem; onClose: () 
             <div>
               <Label>D3E (appareils repris) <span className="text-red-500">*</span></Label>
               <Input type="number" min="0" value={f.d3e} onChange={set('d3e')} placeholder="0" className="mt-1" />
-              {!hasD3E && f.d3e !== '' && <p className="text-xs text-red-600 mt-1">D3E requis</p>}
+              {f.d3e === '' && <p className="text-xs text-red-600 mt-1">D3E requis</p>}
             </div>
+
+            {needsPhoto && (
+              <div>
+                <Label>Photo du D3E <span className="text-red-500">*</span></Label>
+                <div className="mt-1 space-y-1">
+                  {existingPhotos.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2 mb-1.5">
+                      {existingPhotos.map(p => (
+                        <ConfirmPhotoThumb
+                          key={p.id}
+                          baseUrl={`/tours/${tour.id}`}
+                          photo={p}
+                          onDelete={() => deletePhotoMut.mutate(p.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {photoFiles.map((file, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm bg-gray-50 rounded px-2 py-1">
+                      <Camera size={12} className="text-gray-400 shrink-0" />
+                      <span className="flex-1 truncate text-xs">{file.name}</span>
+                      <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  <input type="file" accept=".jpg,.jpeg,.png,.pdf" id="tour-confirm-photos" className="hidden" multiple
+                    onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+                  <label htmlFor="tour-confirm-photos"
+                    className="cursor-pointer flex items-center gap-1.5 text-sm border border-dashed border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 w-full">
+                    <Upload size={14} /> Ajouter une photo
+                  </label>
+                </div>
+                {!hasPhoto && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Une photo est requise pour justifier le D3E
+                  </p>
+                )}
+              </div>
+            )}
+
             <div>
               <Label>Notes (optionnel)</Label>
               <textarea value={f.notes} onChange={set('notes')} placeholder="Observations..."
@@ -412,22 +478,23 @@ function ExpressCard({ item, onConfirm, onViewPhoto }: {
 }
 
 // ── Confirmation photo thumbnail (employee view) ───────────────────────────────
+// baseUrl is the parent resource's base path, e.g. `/express/${deliveryId}` or `/tours/${tourId}`
 
-function EmployeeConfirmThumb({ deliveryId, photo, onDelete }: {
-  deliveryId: string;
+function ConfirmPhotoThumb({ baseUrl, photo, onDelete }: {
+  baseUrl: string;
   photo: ConfirmationPhoto;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [mime, setMime] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get(`/express/${deliveryId}/confirmation-photos/${photo.id}`, { responseType: 'blob' })
+    api.get(`${baseUrl}/confirmation-photos/${photo.id}`, { responseType: 'blob' })
       .then(r => { setMime(r.data.type); setSrc(URL.createObjectURL(r.data)); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [deliveryId, photo.id]);
+  }, [baseUrl, photo.id]);
 
   return (
     <div className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50" style={{ aspectRatio: '4/3' }}>
@@ -452,10 +519,12 @@ function EmployeeConfirmThumb({ deliveryId, photo, onDelete }: {
           <Camera size={16} className="text-gray-300" />
         </div>
       )}
-      <button onClick={onDelete}
-        className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
-        <X size={10} />
-      </button>
+      {onDelete && (
+        <button onClick={onDelete}
+          className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
+          <X size={10} />
+        </button>
+      )}
     </div>
   );
 }
@@ -592,9 +661,9 @@ function PhotoLightbox({ deliveryId, initialNotes, onClose, onChanged }: {
             ) : photos.length > 0 ? (
               <div className="grid grid-cols-3 gap-2">
                 {photos.map(p => (
-                  <EmployeeConfirmThumb
+                  <ConfirmPhotoThumb
                     key={p.id}
-                    deliveryId={deliveryId}
+                    baseUrl={`/express/${deliveryId}`}
                     photo={p}
                     onDelete={() => handleDelete(p.id)}
                   />

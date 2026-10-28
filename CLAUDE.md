@@ -47,11 +47,11 @@ cd frontend && npm run dev
 
 **JWT auth guards are ACTIVE globally**: `JwtAuthGuard` is registered as `APP_GUARD` in `app.module.ts` — all routes require a valid token by default. Use `@Public()` decorator to exempt a route. Do NOT bypass or remove this.
 
-**Import queue is bypassed**: `ImportQueueService` (BullMQ) is implemented but intentionally unused. `ImportsService.uploadFile()` parses Excel synchronously. Do not refactor to async unless explicitly asked.
+**Import queue removed**: `ImportQueueService` (BullMQ) was implemented but unused — `ImportsService.uploadFile()` parses Excel synchronously. Archived out of `backend/src/imports/` (2026-09-05, zero references confirmed) to `TourneePro-Cleanup-Archive/dead-code/backend-imports/` alongside the repo. Do not refactor imports to async unless explicitly asked; restore from the archive first if that work is picked up again.
 
-**Dead code**: `ExcelParserService` has stubs for Garonor format — never inject it; it is not production-ready.
+**Dead code removed**: `ExcelParserService` (Garonor-format stubs, never production-ready) was never registered in `imports.module.ts` and had zero references. Archived to `TourneePro-Cleanup-Archive/dead-code/backend-imports/` (2026-09-05). The active parser is `BoulangerParserService`.
 
-**Assignments.tsx and Import.tsx**: Files exist but are NOT routed. Assignments moved into Tours detail panel. Import moved to Settings → ImportCard. Do not reinstate their routes.
+**Assignments.tsx and Import.tsx**: Removed from `frontend/src/pages/` (2026-09-05, unrouted, zero references confirmed) — archived to `TourneePro-Cleanup-Archive/dead-code/frontend-pages/` alongside the repo. Assignments functionality lives in the Tours detail panel; Import moved to Settings → ImportCard. Do not reinstate their routes; restore from the archive first if that old UI is needed as a reference.
 
 ## Security (all active as of June 2026)
 
@@ -147,3 +147,18 @@ Sync is idempotent: re-running updates existing tours, never duplicates.
 
 - **Auto-sync cron**: currently manual (Actualiser button). Could be automated to run each morning.
 - **Google Cloud migration**: OAuth project currently under personal Gmail (`couco1995@gmail.com`). Migrate to STP Gmail before production.
+
+## Known Issue — Investigating: "Actualiser" returning no tours (opened 2026-09-08)
+
+Reported symptom: the Actualiser button on Tours (Garonor + Alfortville sync) used to pull tours and recently stops returning any data.
+
+**Investigation so far (2026-09-08, verified against a fresh prod DB pull restored locally):**
+- OAuth refresh token is valid (confirmed live against Google's token endpoint), both sheet URLs are reachable, and the parser's column offsets match the live sheet headers exactly for both Garonor (`boulanger-parser.service.ts` → `parseGaronorGrid`) and Alfortville (`parseAlfortvilleGrid`). Confirmed correct parsing against Garonor's already-filled "today" tab (49 real STP tours parsed correctly).
+- At the moment of testing: Garonor's tomorrow-tab (day-ahead sheet) had zero tour numbers entered — empty template. Alfortville's today-tab had all tour-number placeholders present but the **Société (company) column was blank for every row** — STP filter (`isStp()`) matches on that column, so an unfilled sheet yields zero rows with no error thrown. This looks like normal "not filled in by Boulanger yet today" state, not a code bug.
+- DB evidence: last tour synced for **any** platform was **2026-08-31** — a full 8-day gap with zero new tours as of 2026-09-08. That gap is too long to be just "checked at the wrong time of day" — points to either nobody running Actualiser at the right time since Aug 31, or the upstream sheets not being filled in during that window.
+
+**Not yet confirmed:**
+- Whether clicking Actualiser in production shows an error or silently succeeds with 0 created/updated (need the user's direct observation from the actual button click).
+- Whether the source sheets are being filled in at all during Sept 1–8 (needs checking once Boulanger populates a day's sheet — the current empty-column state blocks further diagnosis).
+
+**Next step:** once the Garonor/Alfortville sheets are actually filled in for a given day (Société column populated with STP entries), re-run Actualiser and check: (a) does it now correctly pick up the rows, confirming this was purely a data-timing issue; or (b) does it still return zero/error even with a filled sheet, which would point to a real regression (e.g. token scope, sheet permission change, or a parser edge case not caught by this pass). Resume by re-fetching the live grids the same way as this session did (Sheets API `values.get` with the stored `sheets.url_1`/`sheets.url_2`) and re-running the parser logic against them.

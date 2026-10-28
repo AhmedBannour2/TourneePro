@@ -1,11 +1,18 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TourType, EmployeeRole, WorkedDayStatus, ExpressMissionType } from '@prisma/client';
+import {
+  Prisma,
+  TourType,
+  EmployeeRole,
+  WorkedDayStatus,
+  ExpressMissionType,
+} from '@prisma/client';
 import { GetWorkedDaysQueryDto } from './dto/get-worked-days-query.dto';
 import { OverrideWorkedDayDto } from './dto/override-worked-day.dto';
 import { AddExpressDto } from './dto/add-express.dto';
@@ -65,6 +72,8 @@ const WORKED_DAY_INCLUDE = {
 
 @Injectable()
 export class WorkedDaysService {
+  private readonly logger = new Logger(WorkedDaysService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // ── Pay rate lookup ────────────────────────────────────────────────────────
@@ -150,12 +159,6 @@ export class WorkedDaysService {
     const d = new Date(tourDate);
     const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
-    // Cancel any existing ASSIGNED worked days for this tour (handles re-assignment)
-    await this.prisma.workedDay.updateMany({
-      where: { tourId, status: WorkedDayStatus.ASSIGNED },
-      data: { status: WorkedDayStatus.CANCELLED },
-    });
-
     const resolveBasePay = async (employeeId: string, role: EmployeeRole): Promise<number> => {
       if (platformId) {
         const platPay = await this.getPlatformPayRate(employeeId, platformId, role);
@@ -164,45 +167,63 @@ export class WorkedDaysService {
       return this.getPayRate(employeeId, tourType, role);
     };
 
-    const creates: Promise<any>[] = [];
+    // Pay-rate lookups are pure reads — resolve them before the transaction below,
+    // which only needs to cover the write race (cancel-then-create).
+    const chauffeurPay = chauffeurId
+      ? await resolveBasePay(chauffeurId, EmployeeRole.CHAUFFEUR)
+      : null;
+    const aidePay = aideId ? await resolveBasePay(aideId, EmployeeRole.AIDE) : null;
 
-    if (chauffeurId) {
-      const basePay = await resolveBasePay(chauffeurId, EmployeeRole.CHAUFFEUR);
-      creates.push(
-        this.prisma.workedDay.create({
-          data: {
-            employeeId: chauffeurId,
-            tourId,
-            date,
-            tourType,
-            employeeRole: EmployeeRole.CHAUFFEUR,
-            basePay,
-            finalPay: basePay,
-            status: WorkedDayStatus.ASSIGNED,
-          },
-        }),
-      );
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Cancel any existing ASSIGNED worked days for this tour (handles re-assignment)
+        await tx.workedDay.updateMany({
+          where: { tourId, status: WorkedDayStatus.ASSIGNED },
+          data: { status: WorkedDayStatus.CANCELLED },
+        });
+
+        if (chauffeurId) {
+          await tx.workedDay.create({
+            data: {
+              employeeId: chauffeurId,
+              tourId,
+              date,
+              tourType,
+              employeeRole: EmployeeRole.CHAUFFEUR,
+              basePay: chauffeurPay!,
+              finalPay: chauffeurPay!,
+              status: WorkedDayStatus.ASSIGNED,
+            },
+          });
+        }
+
+        if (aideId) {
+          await tx.workedDay.create({
+            data: {
+              employeeId: aideId,
+              tourId,
+              date,
+              tourType,
+              employeeRole: EmployeeRole.AIDE,
+              basePay: aidePay!,
+              finalPay: aidePay!,
+              status: WorkedDayStatus.ASSIGNED,
+            },
+          });
+        }
+      });
+    } catch (err: unknown) {
+      // A live WorkedDay already exists for this tour+employee (worked_days_tour_employee_live_key).
+      // Happens when two near-simultaneous assignment requests for the same tour race each other,
+      // or when the same unchanged assignment is re-saved — either way this call is a safe no-op.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        this.logger.warn(
+          `createFromAssignment: duplicate call for tour ${tourId} ignored (${err.meta?.target})`,
+        );
+        return;
+      }
+      throw err;
     }
-
-    if (aideId) {
-      const basePay = await resolveBasePay(aideId, EmployeeRole.AIDE);
-      creates.push(
-        this.prisma.workedDay.create({
-          data: {
-            employeeId: aideId,
-            tourId,
-            date,
-            tourType,
-            employeeRole: EmployeeRole.AIDE,
-            basePay,
-            finalPay: basePay,
-            status: WorkedDayStatus.ASSIGNED,
-          },
-        }),
-      );
-    }
-
-    await Promise.all(creates);
   }
 
   async cancelFromUnassignment(tourId: string) {
@@ -221,19 +242,28 @@ export class WorkedDaysService {
     const basePay = await this.getPayRate(dto.employeeId, dto.tourType, dto.employeeRole);
     const date = new Date(dto.date);
 
-    return this.prisma.workedDay.create({
-      data: {
-        employeeId: dto.employeeId,
-        tourId: dto.tourId ?? null,
-        date,
-        tourType: dto.tourType,
-        employeeRole: dto.employeeRole,
-        basePay,
-        finalPay: basePay,
-        status: WorkedDayStatus.ASSIGNED,
-      },
-      include: WORKED_DAY_INCLUDE,
-    });
+    try {
+      return await this.prisma.workedDay.create({
+        data: {
+          employeeId: dto.employeeId,
+          tourId: dto.tourId ?? null,
+          date,
+          tourType: dto.tourType,
+          employeeRole: dto.employeeRole,
+          basePay,
+          finalPay: basePay,
+          status: WorkedDayStatus.ASSIGNED,
+        },
+        include: WORKED_DAY_INCLUDE,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestException(
+          'This employee already has an active worked day for this tour.',
+        );
+      }
+      throw err;
+    }
   }
 
   // ── List ──────────────────────────────────────────────────────────────────

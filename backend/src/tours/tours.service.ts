@@ -13,6 +13,7 @@ import { DashboardStatsResponseDto } from './dto/dashboard-stats-response.dto';
 import { MailService } from '../notification/mail.service';
 import { WorkedDaysService } from '../worked-days/worked-days.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { ConfirmationStatus, WorkedDayStatus, TourSource } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { CreateTourDto } from './dto/create-tour.dto';
@@ -28,6 +29,7 @@ export class ToursService {
     private readonly mailService: MailService,
     private readonly workedDaysService: WorkedDaysService,
     private readonly notificationsService: NotificationsService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   async findAll(query: GetToursQueryDto) {
@@ -96,6 +98,7 @@ export class ToursService {
           confirmation: {
             include: { confirmedBy: { select: { id: true, name: true } } },
           },
+          confirmationPhotos: true,
         },
       }),
       this.prisma.tour.count({ where }),
@@ -134,6 +137,7 @@ export class ToursService {
         confirmation: {
           include: { confirmedBy: { select: { id: true, name: true } } },
         },
+        confirmationPhotos: true,
       },
     });
 
@@ -162,6 +166,7 @@ export class ToursService {
         platform: true,
         assignments: { include: { chauffeur: true, aide: true, truck: true } },
         confirmation: { include: { confirmedBy: { select: { id: true, name: true } } } },
+        confirmationPhotos: true,
       },
     });
   }
@@ -513,6 +518,7 @@ export class ToursService {
         platform: true,
         assignments: { include: { chauffeur: true, aide: true, truck: true } },
         confirmation: { include: { confirmedBy: { select: { id: true, name: true } } } },
+        confirmationPhotos: true,
       },
     });
   }
@@ -566,6 +572,12 @@ export class ToursService {
 
     if (dto.delivered + dto.absent > dto.totalClients) {
       throw new BadRequestException('Delivered + absent exceeds total clients');
+    }
+
+    if ((dto.d3e ?? 0) > 0 && tour.confirmationPhotos.length === 0) {
+      throw new BadRequestException(
+        'Une photo est requise pour justifier les appareils D3E repris',
+      );
     }
 
     const existing = await this.prisma.tourConfirmation.findUnique({ where: { tourId } });
@@ -662,6 +674,7 @@ export class ToursService {
         delivered: dto.delivered,
         absent: dto.absent,
         nonConform: dto.nonConform,
+        d3e: dto.d3e ?? null,
         notes: dto.notes ?? null,
       },
       include: { confirmedBy: { select: { id: true, name: true } } },
@@ -686,6 +699,13 @@ export class ToursService {
       throw new BadRequestException('Delivered + absent exceeds total clients');
     }
 
+    const tour = await this.findOne(tourId);
+    if ((dto.d3e ?? 0) > 0 && tour.confirmationPhotos.length === 0) {
+      throw new BadRequestException(
+        'Une photo est requise pour justifier les appareils D3E repris',
+      );
+    }
+
     const updated = await this.prisma.tourConfirmation.update({
       where: { tourId },
       data: {
@@ -693,16 +713,104 @@ export class ToursService {
         delivered: dto.delivered,
         absent: dto.absent,
         nonConform: dto.nonConform,
+        d3e: dto.d3e ?? null,
         notes: dto.notes ?? null,
       },
       include: { confirmedBy: { select: { id: true, name: true } } },
     });
 
     // Repair: create WorkedDay records if they were never generated (pre-fix assignments)
-    const tour = await this.findOne(tourId);
     await this.ensureAndConfirmWorkedDays(tourId, tour);
 
     return updated;
+  }
+
+  // ── Confirmation photos ─────────────────────────────────────────────────
+
+  async addConfirmationPhoto(tourId: string, file: Express.Multer.File) {
+    await this.findOne(tourId);
+    const url = await this.cloudinary.uploadBuffer(
+      file.buffer,
+      file.mimetype,
+      `tournee-pro/tours/${tourId}/confirmation`,
+      file.originalname,
+    );
+    this.logger.log(`Tour confirmation photo uploaded: ${url}`);
+    await this.prisma.tourConfirmationPhoto.create({ data: { tourId, url } });
+    return this.findOne(tourId);
+  }
+
+  async deleteConfirmationPhoto(tourId: string, photoId: string) {
+    const photo = await this.prisma.tourConfirmationPhoto.findUnique({ where: { id: photoId } });
+    if (!photo || photo.tourId !== tourId) throw new NotFoundException('Photo not found');
+    await this.cloudinary.deleteByUrl(photo.url);
+    await this.prisma.tourConfirmationPhoto.delete({ where: { id: photoId } });
+  }
+
+  async getConfirmationPhoto(tourId: string, photoId: string) {
+    const photo = await this.prisma.tourConfirmationPhoto.findUnique({ where: { id: photoId } });
+    if (!photo || photo.tourId !== tourId) throw new NotFoundException('Photo not found');
+    return this.cloudinary.downloadFile(photo.url);
+  }
+
+  // ── Monthly report ───────────────────────────────────────────────────────
+
+  async getMonthlyReport(month?: string) {
+    const now = new Date();
+    const [yearStr, monthStr] = (month ?? '').split('-');
+    const year = yearStr ? parseInt(yearStr, 10) : now.getUTCFullYear();
+    const monthIndex = monthStr ? parseInt(monthStr, 10) - 1 : now.getUTCMonth();
+
+    const monthStart = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+    const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+    const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+    const confirmations = await this.prisma.tourConfirmation.findMany({
+      where: { tour: { date: { gte: monthStart, lte: monthEnd } } },
+      include: { tour: { select: { platformId: true, platform: { select: { name: true } } } } },
+    });
+
+    const makeTotals = () => ({ totalClients: 0, delivered: 0, absent: 0, nonConform: 0, d3e: 0 });
+    const rate = (t: { delivered: number; totalClients: number }) =>
+      t.totalClients > 0 ? Math.round((t.delivered / t.totalClients) * 1000) / 10 : 0;
+
+    const global = makeTotals();
+    const byPlatform = new Map<string, { platformName: string } & ReturnType<typeof makeTotals>>();
+
+    for (const c of confirmations) {
+      global.totalClients += c.totalClients;
+      global.delivered += c.delivered;
+      global.absent += c.absent;
+      global.nonConform += c.nonConform;
+      global.d3e += c.d3e ?? 0;
+
+      const platformId = c.tour.platformId;
+      if (!byPlatform.has(platformId)) {
+        byPlatform.set(platformId, { platformName: c.tour.platform.name, ...makeTotals() });
+      }
+      const p = byPlatform.get(platformId)!;
+      p.totalClients += c.totalClients;
+      p.delivered += c.delivered;
+      p.absent += c.absent;
+      p.nonConform += c.nonConform;
+      p.d3e += c.d3e ?? 0;
+    }
+
+    return {
+      month: monthKey,
+      confirmedTours: confirmations.length,
+      global: { ...global, deliveryRate: rate(global) },
+      byPlatform: Array.from(byPlatform.entries()).map(([platformId, p]) => ({
+        platformId,
+        platformName: p.platformName,
+        totalClients: p.totalClients,
+        delivered: p.delivered,
+        absent: p.absent,
+        nonConform: p.nonConform,
+        d3e: p.d3e,
+        deliveryRate: rate(p),
+      })),
+    };
   }
 
   // Creates WorkedDay records for a tour if they don't exist yet, then confirms them all.

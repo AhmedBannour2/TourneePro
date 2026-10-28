@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../notification/mail.service';
 import { WorkedDaysService } from '../worked-days/worked-days.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 describe('ToursService', () => {
   let service: ToursService;
@@ -43,10 +44,13 @@ describe('ToursService', () => {
       create: jest.fn(),
     },
     workedDay: {
+      count: jest.fn(),
       updateMany: jest.fn(),
     },
     tourConfirmation: {
       findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
     platform: {
       findUnique: jest.fn(),
@@ -68,6 +72,12 @@ describe('ToursService', () => {
     createForRole: jest.fn(),
   };
 
+  const mockCloudinaryService = {
+    uploadBuffer: jest.fn(),
+    downloadFile: jest.fn(),
+    deleteByUrl: jest.fn(),
+  };
+
   const mockTour = {
     id: 'tour-uuid-1',
     tourCode: '850',
@@ -77,6 +87,7 @@ describe('ToursService', () => {
     platform: { id: 'plat-uuid-1', name: 'Garonor', code: 'GAR' },
     assignments: [],
     confirmation: null,
+    confirmationPhotos: [],
     importBatch: null,
     confirmationStatus: 'PENDING',
   };
@@ -89,6 +100,7 @@ describe('ToursService', () => {
         { provide: MailService, useValue: mockMailService },
         { provide: WorkedDaysService, useValue: mockWorkedDaysService },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: CloudinaryService, useValue: mockCloudinaryService },
       ],
     }).compile();
 
@@ -370,6 +382,46 @@ describe('ToursService', () => {
           'user-1',
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when d3e > 0 and no confirmation photo was uploaded', async () => {
+      const tourWithAssignment = {
+        ...mockTour,
+        assignments: [{ id: 'assign-1', chauffeurId: 'emp-1', aideId: null }],
+        confirmationPhotos: [],
+      };
+      mockPrismaService.employee.findUnique.mockResolvedValue({ id: 'emp-1', name: 'Jean' });
+      mockPrismaService.tour.findUnique.mockResolvedValue(tourWithAssignment);
+      mockPrismaService.tourConfirmation.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.confirmTour(
+          'tour-uuid-1',
+          { totalClients: 10, delivered: 8, absent: 2, nonConform: 0, d3e: 2 },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('succeeds when d3e > 0 and a confirmation photo is already attached to the tour', async () => {
+      const tourWithAssignment = {
+        ...mockTour,
+        assignments: [{ id: 'assign-1', chauffeurId: 'emp-1', aideId: null }],
+        confirmationPhotos: [{ id: 'photo-1', tourId: 'tour-uuid-1', url: 'https://...' }],
+      };
+      mockPrismaService.employee.findUnique.mockResolvedValue({ id: 'emp-1', name: 'Jean' });
+      mockPrismaService.tour.findUnique.mockResolvedValue(tourWithAssignment);
+      mockPrismaService.tourConfirmation.findUnique.mockResolvedValue(null);
+      mockPrismaService.$transaction.mockResolvedValue([{ id: 'confirm-1' }]);
+      mockPrismaService.workedDay.count.mockResolvedValue(1);
+
+      await expect(
+        service.confirmTour(
+          'tour-uuid-1',
+          { totalClients: 10, delivered: 8, absent: 2, nonConform: 0, d3e: 2 },
+          'user-1',
+        ),
+      ).resolves.toEqual({ id: 'confirm-1' });
     });
   });
 });

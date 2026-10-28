@@ -8,13 +8,27 @@ import {
   Delete,
   Body,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
   Req,
+  Res,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/dto/register.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { ToursService } from './tours.service';
 import { GetToursQueryDto } from './dto/get-tours-query.dto';
 import { AssignTourDto } from './dto/assign-tour.dto';
@@ -141,6 +155,66 @@ export class ToursController {
   @ApiParam({ name: 'id', description: 'Tour UUID' })
   updateConfirmation(@Param('id') id: string, @Body() dto: ConfirmTourDto, @Req() req: any) {
     return this.toursService.updateConfirmation(id, dto, req.user.id);
+  }
+
+  @Post(':id/confirmation-photos')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Add a confirmation photo to a tour (proof of D3E pickup, multiple allowed)',
+  })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new BadRequestException('Only PDF, JPG, PNG allowed') as any, false);
+      },
+    }),
+  )
+  addConfirmationPhoto(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('File is required');
+    return this.toursService.addConfirmationPhoto(id, file);
+  }
+
+  @Delete(':id/confirmation-photos/:photoId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Delete a tour confirmation photo' })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  @ApiParam({ name: 'photoId', description: 'Photo UUID' })
+  async deleteConfirmationPhoto(@Param('id') id: string, @Param('photoId') photoId: string) {
+    await this.toursService.deleteConfirmationPhoto(id, photoId);
+  }
+
+  @Get(':id/confirmation-photos/:photoId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Stream a tour confirmation photo' })
+  @ApiParam({ name: 'id', description: 'Tour UUID' })
+  @ApiParam({ name: 'photoId', description: 'Photo UUID' })
+  async getConfirmationPhoto(
+    @Param('id') id: string,
+    @Param('photoId') photoId: string,
+    @Res() res: any,
+  ) {
+    const { buffer, contentType } = await this.toursService.getConfirmationPhoto(id, photoId);
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.send(buffer);
+  }
+
+  @Get('dashboard/monthly-report')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Monthly delivery report: delivered/absent/D3E totals and delivery rate, global and per platform',
+  })
+  @ApiQuery({ name: 'month', description: 'Month in YYYY-MM format', required: false })
+  getMonthlyReport(@Query('month') month?: string) {
+    return this.toursService.getMonthlyReport(month);
   }
 
   @Get('days/:date/validation-preview')

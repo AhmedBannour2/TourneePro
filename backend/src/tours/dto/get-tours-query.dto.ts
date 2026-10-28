@@ -3,17 +3,29 @@ import { IsOptional, IsString, IsDateString, IsInt, Min, Max, IsUUID } from 'cla
 import { Type } from 'class-transformer';
 
 export class GetToursQueryDto {
-  @ApiProperty({ description: 'Filter by specific date (ISO format)', required: false, example: '2026-05-27' })
+  @ApiProperty({
+    description: 'Filter by specific date (ISO format)',
+    required: false,
+    example: '2026-05-27',
+  })
   @IsOptional()
   @IsDateString()
   date?: string;
 
-  @ApiProperty({ description: 'Filter by date from (ISO format)', required: false, example: '2026-05-01' })
+  @ApiProperty({
+    description: 'Filter by date from (ISO format)',
+    required: false,
+    example: '2026-05-01',
+  })
   @IsOptional()
   @IsDateString()
   dateFrom?: string;
 
-  @ApiProperty({ description: 'Filter by date to (ISO format)', required: false, example: '2026-05-31' })
+  @ApiProperty({
+    description: 'Filter by date to (ISO format)',
+    required: false,
+    example: '2026-05-31',
+  })
   @IsOptional()
   @IsDateString()
   dateTo?: string;
@@ -33,7 +45,10 @@ export class GetToursQueryDto {
   @IsString()
   chauffeurId?: string;
 
-  @ApiProperty({ description: 'Filter by confirmation status (UNCONFIRMED | CONFIRMED)', required: false })
+  @ApiProperty({
+    description: 'Filter by confirmation status (UNCONFIRMED | CONFIRMED)',
+    required: false,
+  })
   @IsOptional()
   @IsString()
   confirmationStatus?: string;
@@ -45,7 +60,13 @@ export class GetToursQueryDto {
   @Min(1)
   page?: number;
 
-  @ApiProperty({ description: 'Items per page', required: false, default: 50, minimum: 1, maximum: 500 })
+  @ApiProperty({
+    description: 'Items per page',
+    required: false,
+    default: 50,
+    minimum: 1,
+    maximum: 500,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

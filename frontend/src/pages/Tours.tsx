@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   X, ChevronLeft, ChevronRight, Eye, EyeOff, CheckCircle2, Clock,
   ChevronDown, ChevronUp, Plus, Loader2, Trash2, ClipboardCheck, RefreshCw,
-  SlidersHorizontal, Pencil, Bell, BellOff, FileSpreadsheet,
+  SlidersHorizontal, Pencil, Bell, BellOff, FileSpreadsheet, Camera, Upload,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -150,6 +150,10 @@ interface TourConfirmation {
   notes: string | null; confirmedAt: string; updatedAt: string;
 }
 
+interface ConfirmationPhoto {
+  id: string; url: string; uploadedAt: string;
+}
+
 interface Tour {
   id: string; tourCode: string; date: string;
   platform: { id: string; name: string; code: string } | null;
@@ -157,6 +161,7 @@ interface Tour {
   confirmationStatus: 'UNCONFIRMED' | 'CONFIRMED';
   horaire: string | null; quai: string | null; nbColis: number | null; prestataire: string | null;
   assignments: Assignment[]; confirmation: TourConfirmation | null;
+  confirmationPhotos: ConfirmationPhoto[];
 }
 
 interface Platform { id: string; name: string }
@@ -497,6 +502,48 @@ interface ConfirmFields {
 }
 const EMPTY_CONF: ConfirmFields = { totalClients: '', delivered: '', absent: '', nonConform: '', d3e: '', notes: '' };
 
+function AdminConfirmPhotoThumb({ tourId, photo, onDelete }: {
+  tourId: string; photo: ConfirmationPhoto; onDelete: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [mime, setMime] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get(`/tours/${tourId}/confirmation-photos/${photo.id}`, { responseType: 'blob' })
+      .then(r => { setMime(r.data.type); setSrc(URL.createObjectURL(r.data)); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [tourId, photo.id]);
+
+  return (
+    <div className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50" style={{ aspectRatio: '4/3' }}>
+      {loading ? (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Loader2 size={14} className="animate-spin text-gray-300" />
+        </div>
+      ) : src ? (
+        mime === 'application/pdf' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer" onClick={() => window.open(src, '_blank')}>
+            <span className="text-xs text-blue-600">PDF</span>
+          </div>
+        ) : (
+          <img src={src} alt="D3E" className="absolute inset-0 w-full h-full object-cover cursor-pointer"
+            onClick={() => window.open(src, '_blank')} />
+        )
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Camera size={16} className="text-gray-300" />
+        </div>
+      )}
+      <button onClick={onDelete}
+        className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
+        <X size={10} />
+      </button>
+    </div>
+  );
+}
+
 function AdminConfirmModal({ tour, onClose, onSaved }: {
   tour: Tour; onClose: () => void; onSaved: () => void;
 }) {
@@ -509,6 +556,8 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
           d3e: existing.d3e != null ? String(existing.d3e) : '', notes: existing.notes ?? '' }
       : EMPTY_CONF,
   );
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [existingPhotos, setExistingPhotos] = useState(tour.confirmationPhotos);
   const { error: toastError, toasts, removeToast } = useToast();
 
   const n = (v: string) => (v === '' ? 0 : parseInt(v, 10) || 0);
@@ -516,11 +565,31 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
   const sum   = n(f.delivered) + n(f.absent);
   const valid = total > 0 && sum <= total && f.d3e !== '';
 
+  const addFiles = (files: FileList | null) => {
+    if (!files) return;
+    setPhotoFiles(prev => [...prev, ...Array.from(files)]);
+  };
+  const removeFile = (idx: number) => setPhotoFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const deletePhotoMut = useMutation({
+    mutationFn: (photoId: string) => api.delete(`/tours/${tour.id}/confirmation-photos/${photoId}`),
+    onSuccess: (_d, photoId) => setExistingPhotos(prev => prev.filter(p => p.id !== photoId)),
+    onError: (e: any) => toastError(e.response?.data?.message || 'Erreur'),
+  });
+
   const mut = useMutation({
-    mutationFn: (body: object) =>
-      isEdit
+    mutationFn: async (body: object) => {
+      for (const file of photoFiles) {
+        const form = new FormData();
+        form.append('file', file);
+        await api.post(`/tours/${tour.id}/confirmation-photos`, form, {
+          headers: { 'Content-Type': undefined as unknown as string },
+        });
+      }
+      return isEdit
         ? api.patch(`/tours/${tour.id}/confirm-admin`, body)
-        : api.post(`/tours/${tour.id}/confirm-admin`, body),
+        : api.post(`/tours/${tour.id}/confirm-admin`, body);
+    },
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e: any) => toastError(e.response?.data?.message || 'Erreur'),
   });
@@ -571,6 +640,38 @@ function AdminConfirmModal({ tour, onClose, onSaved }: {
             <div>
               <Label>D3E <span className="text-xs font-normal text-gray-400">(appareils repris)</span></Label>
               <Input type="number" min="0" value={f.d3e} onChange={set('d3e')} placeholder="0" className="mt-1 w-40" />
+            </div>
+            <div>
+              <Label>Photo du D3E <span className="text-xs font-normal text-gray-400">(optionnel)</span></Label>
+              <div className="mt-1 space-y-1">
+                {existingPhotos.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2 mb-1.5">
+                    {existingPhotos.map(p => (
+                      <AdminConfirmPhotoThumb
+                        key={p.id}
+                        tourId={tour.id}
+                        photo={p}
+                        onDelete={() => deletePhotoMut.mutate(p.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {photoFiles.map((file, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm bg-gray-50 rounded px-2 py-1">
+                    <Camera size={12} className="text-gray-400 shrink-0" />
+                    <span className="flex-1 truncate text-xs">{file.name}</span>
+                    <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 shrink-0">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                <input type="file" accept=".jpg,.jpeg,.png,.pdf" id="admin-confirm-photos" className="hidden" multiple
+                  onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+                <label htmlFor="admin-confirm-photos"
+                  className="cursor-pointer flex items-center gap-1.5 text-sm border border-dashed border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 w-full">
+                  <Upload size={14} /> Ajouter une photo
+                </label>
+              </div>
             </div>
             <div>
               <Label>Notes (optionnel)</Label>
@@ -1638,8 +1739,11 @@ export default function Tours() {
   });
 
   // History tours query
+  // Last day of month via getDate() (local) — never toISOString() here, it converts to UTC
+  // and silently shifts the date back a day in any UTC+ timezone (e.g. Europe/Paris).
+  const histLastDay = new Date(histYear, histMonth, 0).getDate();
   const histStart = `${histYear}-${String(histMonth).padStart(2, '0')}-01`;
-  const histEnd   = new Date(histYear, histMonth, 0).toISOString().split('T')[0];
+  const histEnd   = `${histYear}-${String(histMonth).padStart(2, '0')}-${String(histLastDay).padStart(2, '0')}`;
   const { data: histData, isLoading: histLoading } = useQuery<ToursResponse>({
     queryKey: ['tours-history', histYear, histMonth, platform, status, confirmFilter],
     queryFn: () => {

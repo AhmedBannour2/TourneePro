@@ -261,6 +261,7 @@ model Tour {
   assignments  Assignment[]
   workedDays   WorkedDay[]
   confirmation TourConfirmation?
+  confirmationPhotos TourConfirmationPhoto[]
 
   @@unique([tourCode, date, platformId], name: "tour_unique_per_day")
   @@index([date])
@@ -401,6 +402,18 @@ model TourConfirmation {
 
   @@index([tourId])
   @@map("tour_confirmations")
+}
+
+model TourConfirmationPhoto {
+  id         String   @id @default(uuid())
+  tourId     String   @map("tour_id")
+  url        String
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+
+  tour Tour @relation(fields: [tourId], references: [id], onDelete: Cascade)
+
+  @@index([tourId])
+  @@map("tour_confirmation_photos")
 }
 
 model GlobalPayRate {
