@@ -503,7 +503,7 @@ interface ConfirmFields {
 const EMPTY_CONF: ConfirmFields = { totalClients: '', delivered: '', absent: '', nonConform: '', d3e: '', notes: '' };
 
 function AdminConfirmPhotoThumb({ tourId, photo, onDelete }: {
-  tourId: string; photo: ConfirmationPhoto; onDelete: () => void;
+  tourId: string; photo: ConfirmationPhoto; onDelete?: () => void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [mime, setMime] = useState('');
@@ -536,10 +536,12 @@ function AdminConfirmPhotoThumb({ tourId, photo, onDelete }: {
           <Camera size={16} className="text-gray-300" />
         </div>
       )}
-      <button onClick={onDelete}
-        className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
-        <X size={10} />
-      </button>
+      {onDelete && (
+        <button onClick={onDelete}
+          className="absolute top-1 right-1 hidden group-hover:flex bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow">
+          <X size={10} />
+        </button>
+      )}
     </div>
   );
 }
@@ -1569,6 +1571,16 @@ function DetailPanel({ tour, onClose, onEdit, onDelete, onConfirm, onRefresh }: 
                       ? Math.round((tour.confirmation.delivered / tour.confirmation.totalClients) * 100) : 0}%
                   </span>
                 </div>
+                {tour.confirmationPhotos.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">Photos ({tour.confirmationPhotos.length})</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {tour.confirmationPhotos.map(p => (
+                        <AdminConfirmPhotoThumb key={p.id} tourId={tour.id} photo={p} />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {tour.confirmation.notes && (
                   <p className="text-xs text-gray-500 italic bg-gray-50 rounded p-2">"{tour.confirmation.notes}"</p>
                 )}
