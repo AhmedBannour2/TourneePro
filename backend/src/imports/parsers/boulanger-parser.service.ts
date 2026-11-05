@@ -446,6 +446,40 @@ export class BoulangerParserService {
     date: Date,
     errors: string[],
   ): ParseResult {
+    return this.parseDayTabGrid(grid, sheetName, date, 'GARONOR', errors);
+  }
+
+  /**
+   * Alfortville (F166) switched from the old single-sheet 4-block layout to the same
+   * day-numbered-tab grid Garonor uses (as of Nov 2026 — Boulanger moved both platforms
+   * onto one shared workbook template). Column layout and STP-row convention are
+   * identical to Garonor's, only the platform tag differs — see parseDayTabGrid.
+   */
+  public parseAlfortvilleDayGrid(
+    grid: any[][],
+    sheetName: string,
+    date: Date,
+    errors: string[] = [],
+  ): ParseResult {
+    return this.parseDayTabGrid(grid, sheetName, date, 'F166', errors);
+  }
+
+  /**
+   * Shared grid parser for the day-numbered-tab layout (Garonor, and Alfortville as of
+   * Nov 2026). Sheet layout: row 1 = labels, row 2 = date in col B, row 3 = headers,
+   * row 4+ = data.
+   * Column mapping (0-indexed):
+   *   A(0) Quantité · B(1) Horaire · C(2) Quai · D(3) Tournée
+   *   E(4) Spécificité · F(5) Prestataires · G(6) Équipage1
+   *   H(7) Équipage2  · I(8) Numéro(phone) · J(9) Immatriculation
+   */
+  private parseDayTabGrid(
+    grid: any[][],
+    sheetName: string,
+    date: Date,
+    platform: 'F166' | 'GARONOR',
+    errors: string[],
+  ): ParseResult {
     const sheetDay = parseInt(sheetName, 10);
     const sheetYear = date.getFullYear();
     const sheetMon = date.getMonth() + 1;
@@ -454,7 +488,7 @@ export class BoulangerParserService {
 
     const rawB2 = grid[1]?.[1];
     this.logger.log(
-      `Garonor: sheet '${sheetName}' — ${grid.length} rows, ` +
+      `${platform}: sheet '${sheetName}' — ${grid.length} rows, ` +
         `B2 raw=${JSON.stringify(rawB2)}, stored dateStr=${sheetDateStr}`,
     );
 
@@ -483,7 +517,7 @@ export class BoulangerParserService {
       allRows.push({
         tourNumber,
         tourType: this.deriveTourType(tourNumber, String(specificite ?? '')),
-        platform: 'GARONOR',
+        platform,
         date: sheetDate,
         dateStr: sheetDateStr,
         horaire: horaire != null ? this.normalizeTime(String(horaire)) : null,
@@ -501,11 +535,11 @@ export class BoulangerParserService {
 
     const stpRows = allRows.filter((r) => this.isStp(r.prestataire));
     this.logger.log(
-      `Garonor sheet '${sheetName}': ${allRows.length} rows total, ${stpRows.length} STP`,
+      `${platform} sheet '${sheetName}': ${allRows.length} rows total, ${stpRows.length} STP`,
     );
 
     return {
-      platform: 'GARONOR',
+      platform,
       date: sheetDate,
       allRows,
       stpRows,

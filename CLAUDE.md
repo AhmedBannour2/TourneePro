@@ -130,7 +130,17 @@ All pages are built and working as of June 2026. Do not treat any of these as st
 
 Two Boulanger Google Sheets are synced via the **"Actualiser"** button on the Tours page:
 - Sheet 1 (Garonor): reads tomorrow's day-numbered tab
-- Sheet 2 (Alfortville): reads the main sheet + "Jours Fériés /Dimanche" sheet when present (Sundays/holidays)
+- Sheet 2 (Alfortville): as of Nov 2026, Boulanger moved Alfortville onto the same day-numbered-tab
+  workbook template Garonor uses (`Historique` + tabs `1`-`31`, identical columns) — reads tomorrow's
+  day-numbered tab via `parseAlfortvilleDayGrid`, tagged platform `F166`. The old single-sheet 4-block
+  layout (`parseAlfortvilleGrid` + "Jours Fériés /Dimanche" merge) is still supported as a fallback for
+  spreadsheets still on the old format.
+
+**Platform detection**: since both platforms can now share the same internal tab names/shape, platform
+is decided from the **spreadsheet's own title** (e.g. "F166 Plan de mise à quai ALFORTVILLE 2026" vs
+"Plan de mise à quai GARONOR 2026" — via `spreadsheets.get().properties.title`), not from sheet/tab
+content. Do not go back to content-only detection (checking for a `Historique` tab, etc.) — that's
+exactly what broke when Alfortville's tab layout changed to match Garonor's.
 
 OAuth credentials stored in Railway env vars (not .env). Admin can reconnect or swap accounts in Settings → Google Sheets.
 Sync is idempotent: re-running updates existing tours, never duplicates.

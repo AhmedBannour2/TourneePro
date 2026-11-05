@@ -149,21 +149,32 @@ export class GoogleSheetsService {
       try {
         this.logger.log(`Fetching sheet metadata ${sheetId}...`);
 
-        // Get sheet names to detect platform
+        // Get the spreadsheet's own title and its tab names.
+        // Platform is decided from the spreadsheet TITLE (e.g. "F166 Plan de mise à quai
+        // ALFORTVILLE 2026" vs "Plan de mise à quai GARONOR 2026") — Boulanger moved both
+        // platforms onto the same internal tab template (Historique + day-numbered tabs 1-31)
+        // as of Nov 2026, so the tab names/shape alone can no longer tell them apart.
         const meta = await sheetsApi.spreadsheets.get({ spreadsheetId: sheetId });
+        const spreadsheetTitle = meta.data.properties?.title ?? '';
         const sheetNames = (meta.data.sheets ?? []).map((s) => s.properties?.title ?? '');
+        const titleLower = spreadsheetTitle.toLowerCase();
+        const isAlfortville = titleLower.includes('alfortville') || titleLower.includes('f166');
+        const isGaronor = titleLower.includes('garonor');
 
         let parsed;
 
-        // Detect Alfortville by sheet name
+        // Old-format Alfortville tab — a sheet literally named "Alfortville"/"F166" holding
+        // the single-sheet 4-block layout. Still supported in case the link hasn't been
+        // swapped to the new day-tab workbook yet.
         const alfortSheetName = sheetNames.find(
           (n) =>
             n.toLowerCase().includes('alfortville') ||
             n.toLowerCase().includes('mise à quai alfortville') ||
             n.toLowerCase().includes('f166'),
         );
+        const hasDayTabs = sheetNames.some((n) => n.trim() === 'Historique');
 
-        if (alfortSheetName) {
+        if (isAlfortville && alfortSheetName) {
           // Fetch main Alfortville sheet — rows 1-28 are the morning blocks (7H-8H30),
           // rows 32-49 are the afternoon ("Après-midi") block, tour numbers in the 200s
           const res = await sheetsApi.spreadsheets.values.get({
@@ -222,7 +233,18 @@ export class GoogleSheetsService {
               this.logger.warn(`Could not parse Jours Fériés sheet: ${e.message}`);
             }
           }
-        } else if (sheetNames.some((n) => n.trim() === 'Historique')) {
+        } else if (isAlfortville && hasDayTabs) {
+          // New-format Alfortville — same day-numbered-tab workbook as Garonor, tag F166.
+          const tomorrow = this.parser.tomorrowDate();
+          const day = tomorrow.getDate();
+          const res = await sheetsApi.spreadsheets.values.get({
+            spreadsheetId: sheetId,
+            range: `'${day}'!A:J`,
+            valueRenderOption: 'UNFORMATTED_VALUE',
+          });
+          const grid: any[][] = res.data.values ?? [];
+          parsed = this.parser.parseAlfortvilleDayGrid(grid, String(day), tomorrow, []);
+        } else if (isGaronor || (!isAlfortville && hasDayTabs)) {
           // Garonor — fetch tomorrow's day sheet
           const tomorrow = this.parser.tomorrowDate();
           const day = tomorrow.getDate();
@@ -235,7 +257,8 @@ export class GoogleSheetsService {
           parsed = this.parser.parseGaronorGrid(grid, String(day), tomorrow, []);
         } else {
           throw new Error(
-            `Cannot detect platform. Sheet names: ${sheetNames.slice(0, 5).join(', ')}`,
+            `Cannot detect platform. Spreadsheet title: "${spreadsheetTitle}". ` +
+              `Sheet names: ${sheetNames.slice(0, 5).join(', ')}`,
           );
         }
 
